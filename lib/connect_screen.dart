@@ -1,0 +1,175 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'signaling.dart';
+import 'session_store.dart';
+
+class ConnectScreen extends StatefulWidget {
+  const ConnectScreen({super.key});
+  @override
+  State<ConnectScreen> createState() => _ConnectScreenState();
+}
+
+class _ConnectScreenState extends State<ConnectScreen> {
+  final url = TextEditingController();
+  final user = TextEditingController(text: 'nc');
+  final pass = TextEditingController();
+  final pin = TextEditingController();
+  String host = '';
+  bool relayOnly = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  Future<void> _restore() async {
+    final p = await SharedPreferences.getInstance();
+    setState(() {
+      url.text = p.getString('url') ?? 'https://';
+      user.text = p.getString('user') ?? 'nc';
+      pass.text = p.getString('pass') ?? '';
+      pin.text = p.getString('pin') ?? '';
+      host = p.getString('host') ?? '';
+      relayOnly = p.getBool('relay') ?? false;
+    });
+    _refresh();
+  }
+
+  Future<void> _save() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('url', url.text);
+    await p.setString('user', user.text);
+    await p.setString('pass', pass.text);
+    await p.setString('pin', pin.text);
+    await p.setString('host', host);
+    await p.setBool('relay', relayOnly);
+  }
+
+  Endpoint? _endpoint() {
+    final u = Uri.tryParse(url.text.trim());
+    if (u == null || u.host.isEmpty) return null;
+    return Endpoint(u, user.text.trim(), pass.text);
+  }
+
+  Future<void> _refresh() async {
+    final ep = _endpoint();
+    if (ep == null) return;
+    final store = context.read<SessionStore>();
+    await store.refreshHosts(ep);
+    if (host.isEmpty && store.hosts.isNotEmpty) setState(() => host = store.hosts.first);
+  }
+
+  Future<void> _connect() async {
+    final ep = _endpoint();
+    if (ep == null) { _snack('Enter a valid rendezvous URL'); return; }
+    if (host.isEmpty) { _snack('Pick a host'); return; }
+    final store = context.read<SessionStore>();
+    await _save();
+    await store.connect(ep, host, pin.text.trim(), relayOnly);
+  }
+
+  void _snack(String s) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<SessionStore>();
+    final connecting = store.state == ConnState.connecting;
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(children: [
+                      Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          gradient: const LinearGradient(
+                              colors: [Color(0xFF4C8DFF), Color(0xFF3AD29F)]),
+                        ),
+                        child: const Icon(Icons.desktop_windows, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('Network Computer',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+                    ]),
+                    const SizedBox(height: 20),
+                    _field(url, 'Rendezvous', hint: 'https://host:8765'),
+                    Row(children: [
+                      Expanded(child: _field(user, 'User')),
+                      const SizedBox(width: 10),
+                      Expanded(child: _field(pass, 'Password', obscure: true)),
+                    ]),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: store.hosts.contains(host) ? host : null,
+                          decoration: const InputDecoration(labelText: 'Host'),
+                          items: store.hosts
+                              .map((h) => DropdownMenuItem(value: h, child: Text(h)))
+                              .toList(),
+                          onChanged: (v) => setState(() => host = v ?? ''),
+                        ),
+                      ),
+                      IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+                    ]),
+                    _field(pin, 'Host PIN', keyboard: TextInputType.number),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Force TURN relay'),
+                      value: relayOnly,
+                      onChanged: (v) => setState(() => relayOnly = v),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton(
+                      onPressed: connecting ? null : _connect,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: connecting
+                            ? Text(store.status)
+                            : const Text('Connect'),
+                      ),
+                    ),
+                    if (store.state == ConnState.failed)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(store.status,
+                            style: const TextStyle(color: Color(0xFFFF5D5D))),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _field(TextEditingController c, String label,
+      {String? hint, bool obscure = false, TextInputType? keyboard}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: TextField(
+        controller: c,
+        obscureText: obscure,
+        keyboardType: keyboard,
+        autocorrect: false,
+        enableSuggestions: false,
+        decoration: InputDecoration(labelText: label, hintText: hint),
+      ),
+    );
+  }
+}
