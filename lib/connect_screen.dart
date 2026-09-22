@@ -15,6 +15,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final user = TextEditingController(text: 'nc');
   final pass = TextEditingController();
   final pin = TextEditingController();
+  final fp = TextEditingController();
   String host = '';
   bool relayOnly = false;
 
@@ -31,6 +32,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
       user.text = p.getString('user') ?? 'nc';
       pass.text = p.getString('pass') ?? '';
       pin.text = p.getString('pin') ?? '';
+      fp.text = p.getString('fp') ?? '';
       host = p.getString('host') ?? '';
       relayOnly = p.getBool('relay') ?? false;
     });
@@ -43,6 +45,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await p.setString('user', user.text);
     await p.setString('pass', pass.text);
     await p.setString('pin', pin.text);
+    await p.setString('fp', fp.text);
     await p.setString('host', host);
     await p.setBool('relay', relayOnly);
   }
@@ -50,7 +53,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Endpoint? _endpoint() {
     final u = Uri.tryParse(url.text.trim());
     if (u == null || u.host.isEmpty) return null;
-    return Endpoint(u, user.text.trim(), pass.text);
+    return Endpoint(u, user.text.trim(), pass.text, fingerprint: fp.text);
   }
 
   Future<void> _refresh() async {
@@ -126,6 +129,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
                     ]),
                     _field(pin, 'Host PIN', keyboard: TextInputType.number),
+                    _field(fp, 'TLS fingerprint (optional)',
+                        hint: 'only for a self-signed secure-mode rendezvous'),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Force TURN relay'),
