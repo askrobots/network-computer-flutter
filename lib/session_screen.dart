@@ -89,8 +89,9 @@ class _SessionScreenState extends State<SessionScreen> {
       child: Row(children: [
         _pill(Icon(Icons.circle, size: 10,
             color: s.relayed ? const Color(0xFFFFB454) : const Color(0xFF3AD29F)),
-            s.relayed ? 'relay ${s.rttMs.toStringAsFixed(0)}ms'
-                       : 'direct ${s.rttMs.toStringAsFixed(0)}ms'),
+            (s.relayed ? 'relay ' : 'direct ') +
+                '${s.rttMs.toStringAsFixed(0)}ms' +
+                (store.mode == 'secure' ? '' : ' · insecure')),
         const Spacer(),
         _round(Icons.bar_chart, () => setState(() => showStats = !showStats)),
         _round(Icons.keyboard, () {

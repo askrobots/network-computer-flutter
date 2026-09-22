@@ -18,10 +18,16 @@ class Endpoint {
   }
 }
 
-/// WebSocket signaling + the /config and /hosts HTTP calls, all Basic-authed.
+/// WebSocket signaling + the /config and /hosts HTTP calls.
+///
+/// Credentials are exchanged once at POST /auth for a bearer token, which is
+/// then used for every call. The rendezvous also still accepts HTTP Basic, so
+/// this degrades gracefully against an older server.
 class SignalingClient {
   final Endpoint ep;
   WebSocket? _ws;
+  String? _token;
+  String mode = 'insecure';
   void Function(SignalMessage)? onMessage;
   void Function(Object?)? onClose;
 
@@ -29,9 +35,32 @@ class SignalingClient {
 
   final _http = HttpClient();
 
+  /// Trade username+password for a token. Falls back to Basic if the server
+  /// has no /auth endpoint.
+  Future<void> authenticate() async {
+    try {
+      final req = await _http.postUrl(ep.base.replace(path: '/auth'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'user': ep.user, 'password': ep.password}));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      if (resp.statusCode == 401) throw 'Rendezvous rejected the password';
+      if (resp.statusCode == 404) return; // older server: stay on Basic
+      if (resp.statusCode >= 300) throw 'Rendezvous returned HTTP ${resp.statusCode}';
+      final j = jsonDecode(body) as Map<String, dynamic>;
+      _token = j['token'] as String?;
+      mode = (j['mode'] as String?) ?? 'insecure';
+    } on SocketException catch (e) {
+      throw 'Cannot reach rendezvous: ${e.message}';
+    }
+  }
+
+  String get _authHeader =>
+      _token != null ? 'Bearer $_token' : ep.authHeader;
+
   Future<T> _getJson<T>(String path, T Function(dynamic) parse) async {
     final req = await _http.getUrl(ep.base.replace(path: path));
-    req.headers.set(HttpHeaders.authorizationHeader, ep.authHeader);
+    req.headers.set(HttpHeaders.authorizationHeader, _authHeader);
     final resp = await req.close();
     if (resp.statusCode == 401) throw 'Rendezvous rejected the password';
     if (resp.statusCode >= 300) throw 'Rendezvous returned HTTP ${resp.statusCode}';
@@ -49,7 +78,7 @@ class SignalingClient {
 
   Future<void> connect() async {
     final ws = await WebSocket.connect(ep.wsUri.toString(),
-        headers: {HttpHeaders.authorizationHeader: ep.authHeader});
+        headers: {HttpHeaders.authorizationHeader: _authHeader});
     _ws = ws;
     ws.listen(
       (data) {

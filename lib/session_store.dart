@@ -23,9 +23,14 @@ class SessionStore extends ChangeNotifier {
 
   Future<void> init() async => renderer.initialize();
 
+  String mode = 'insecure';
+
   Future<void> refreshHosts(Endpoint ep) async {
     try {
-      hosts = await SignalingClient(ep).fetchHosts();
+      final c = SignalingClient(ep);
+      await c.authenticate();
+      mode = c.mode;
+      hosts = await c.fetchHosts();
       notifyListeners();
     } catch (e) {
       _fail('$e');
@@ -42,6 +47,8 @@ class SessionStore extends ChangeNotifier {
     _set(ConnState.connecting, 'fetching config');
     try {
       final sig = SignalingClient(_ep!);
+      await sig.authenticate();
+      mode = sig.mode;
       final ice = await sig.fetchIceServers();
       final peer = PeerClient(ice, _relayOnly, renderer);
       _sig = sig; _peer = peer;
