@@ -18,6 +18,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final fp = TextEditingController();
   String host = '';
   bool relayOnly = false;
+  bool paired = false;
 
   @override
   void initState() {
@@ -27,11 +28,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   Future<void> _restore() async {
     final p = await SharedPreferences.getInstance();
+    await p.remove('pin'); // PIN is no longer stored; pairing replaces it
     setState(() {
       url.text = p.getString('url') ?? 'https://';
       user.text = p.getString('user') ?? 'nc';
       pass.text = p.getString('pass') ?? '';
-      pin.text = p.getString('pin') ?? '';
       fp.text = p.getString('fp') ?? '';
       host = p.getString('host') ?? '';
       relayOnly = p.getBool('relay') ?? false;
@@ -44,7 +45,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await p.setString('url', url.text);
     await p.setString('user', user.text);
     await p.setString('pass', pass.text);
-    await p.setString('pin', pin.text);
     await p.setString('fp', fp.text);
     await p.setString('host', host);
     await p.setBool('relay', relayOnly);
@@ -62,6 +62,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final store = context.read<SessionStore>();
     await store.refreshHosts(ep);
     if (host.isEmpty && store.hosts.isNotEmpty) setState(() => host = store.hosts.first);
+    await _checkPaired();
+  }
+
+  Future<void> _checkPaired() async {
+    final ep = _endpoint();
+    final p = ep != null && host.isNotEmpty && await SessionStore.isPaired(ep, host);
+    if (mounted) setState(() => paired = p);
   }
 
   Future<void> _connect() async {
@@ -123,12 +130,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           items: store.hosts
                               .map((h) => DropdownMenuItem(value: h, child: Text(h)))
                               .toList(),
-                          onChanged: (v) => setState(() => host = v ?? ''),
+                          onChanged: (v) { setState(() => host = v ?? ''); _checkPaired(); },
                         ),
                       ),
                       IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
                     ]),
-                    _field(pin, 'Host PIN', keyboard: TextInputType.number),
+                    _field(pin, paired ? 'Host PIN (paired — not needed)' : 'Host PIN',
+                        keyboard: TextInputType.number),
                     _field(fp, 'TLS fingerprint (optional)',
                         hint: 'only for a self-signed secure-mode rendezvous'),
                     SwitchListTile(

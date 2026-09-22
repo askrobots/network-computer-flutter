@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 // Exercises the client's TLS pinning against a live secure-mode rendezvous.
 //   dart run tool/pin_check.dart <https-url> <password> <fingerprint>
 import 'dart:io';

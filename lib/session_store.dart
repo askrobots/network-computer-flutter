@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'protocol.dart';
 import 'signaling.dart';
 import 'peer.dart';
@@ -69,14 +70,17 @@ class SessionStore extends ChangeNotifier {
       sig.onMessage = (m) async {
         switch (m.type) {
           case 'answer':
+            if (m.pair != null) await _savePair(m.pair!);
             if (m.sdp != null) await peer.setAnswer(m.sdp!);
             break;
           case 'ice':
             if (m.candidate != null) await peer.addCandidate(m.candidate!);
             break;
           case 'error':
+            final err = (m.error ?? '').toLowerCase();
+            if (err.contains('pairing')) await _clearPair();
             _fail(m.error ?? 'rendezvous error');
-            if ((m.error ?? '').toLowerCase().contains('pin')) _wantRetry = false;
+            if (err.contains('pin')) _wantRetry = false;
             break;
         }
       };
@@ -88,7 +92,10 @@ class SessionStore extends ChangeNotifier {
       _set(ConnState.connecting, 'signaling');
       await sig.connect();
       final sdp = await peer.createOffer();
-      sig.send(SignalMessage(type: 'offer', to: _host, sdp: sdp, pin: _pin));
+      final pair = await _loadPair();
+      sig.send(SignalMessage(
+          type: 'offer', to: _host, sdp: sdp,
+          pin: _pin.isEmpty ? null : _pin, pair: pair));
       _set(ConnState.connecting, 'waiting for $_host');
     } catch (e) {
       _fail('$e');
@@ -119,6 +126,20 @@ class SessionStore extends ChangeNotifier {
   }
 
   void send(InputEvent e) => _peer?.send(e);
+
+  // Pairing: after a correct PIN the host returns a signed token; keep one per
+  // rendezvous+host and offer it next time so the PIN is typed once.
+  String _pairKey() => 'pair:${_ep!.base}|$_host';
+  Future<String?> _loadPair() async =>
+      (await SharedPreferences.getInstance()).getString(_pairKey());
+  Future<void> _savePair(String t) async =>
+      (await SharedPreferences.getInstance()).setString(_pairKey(), t);
+  Future<void> _clearPair() async =>
+      (await SharedPreferences.getInstance()).remove(_pairKey());
+
+  /// Whether a pairing token is stored for [ep] + [host] (for the UI hint).
+  static Future<bool> isPaired(Endpoint ep, String host) async =>
+      (await SharedPreferences.getInstance()).getString('pair:${ep.base}|$host') != null;
 
   void _set(ConnState s, String msg) { state = s; status = msg; notifyListeners(); }
   void _fail(String msg) { state = ConnState.failed; status = msg; notifyListeners(); }

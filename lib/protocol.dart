@@ -2,7 +2,7 @@
 
 class SignalMessage {
   String type;
-  String? name, to, from, sdp, pin, error;
+  String? name, to, from, sdp, pin, pair, error;
   Map<String, dynamic>? candidate; // RTCIceCandidateInit shape
   List<String>? hosts;
 
@@ -13,6 +13,7 @@ class SignalMessage {
     this.from,
     this.sdp,
     this.pin,
+    this.pair,
     this.error,
     this.candidate,
     this.hosts,
@@ -24,6 +25,7 @@ class SignalMessage {
     if (to != null) m['to'] = to;
     if (sdp != null) m['sdp'] = sdp;
     if (pin != null) m['pin'] = pin;
+    if (pair != null) m['pair'] = pair;
     if (candidate != null) m['candidate'] = candidate;
     return m;
   }
@@ -35,6 +37,7 @@ class SignalMessage {
         from: j['from'],
         sdp: j['sdp'],
         pin: j['pin'],
+        pair: j['pair'],
         error: j['error'],
         candidate: (j['candidate'] as Map?)?.cast<String, dynamic>(),
         hosts: (j['hosts'] as List?)?.cast<String>(),
