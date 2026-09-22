@@ -14,6 +14,7 @@ class SessionStore extends ChangeNotifier {
   String status = '';
   List<String> hosts = [];
   PeerStats stats = PeerStats();
+  bool micOn = false;
 
   SignalingClient? _sig;
   PeerClient? _peer;
@@ -119,6 +120,7 @@ class SessionStore extends ChangeNotifier {
   }
 
   Future<void> _teardown() async {
+    micOn = false;
     await _peer?.close();
     _peer = null;
     _sig?.close();
@@ -126,6 +128,18 @@ class SessionStore extends ChangeNotifier {
   }
 
   void send(InputEvent e) => _peer?.send(e);
+
+  Future<void> toggleMic() async {
+    final want = !micOn;
+    try {
+      await _peer?.setMic(want);
+      micOn = want;
+    } catch (e) {
+      micOn = false;
+      status = 'Microphone unavailable: $e';
+    }
+    notifyListeners();
+  }
 
   // Pairing: after a correct PIN the host returns a signed token; keep one per
   // rendezvous+host and offer it next time so the PIN is typed once.

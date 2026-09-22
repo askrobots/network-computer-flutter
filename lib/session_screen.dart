@@ -92,6 +92,9 @@ class _SessionScreenState extends State<SessionScreen> {
             '${s.relayed ? 'relay' : 'direct'} ${s.rttMs.toStringAsFixed(0)}ms'
                 '${store.mode == 'secure' ? '' : ' · insecure'}'),
         const Spacer(),
+        _round(store.micOn ? Icons.mic : Icons.mic_off,
+            () => context.read<SessionStore>().toggleMic(),
+            active: store.micOn),
         _round(Icons.bar_chart, () => setState(() => showStats = !showStats)),
         _round(Icons.keyboard, () {
           setState(() => keyboardOpen = !keyboardOpen);
@@ -114,10 +117,10 @@ class _SessionScreenState extends State<SessionScreen> {
         ]),
       );
 
-  Widget _round(IconData icon, VoidCallback onTap) => Padding(
+  Widget _round(IconData icon, VoidCallback onTap, {bool active = false}) => Padding(
         padding: const EdgeInsets.only(left: 6),
         child: Material(
-          color: const Color(0xCC1C2129),
+          color: active ? const Color(0xFFFF5D5D) : const Color(0xCC1C2129),
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),

@@ -19,6 +19,8 @@ class PeerClient {
 
   RTCPeerConnection? _pc;
   RTCDataChannel? _input;
+  RTCRtpTransceiver? _audioTx;
+  MediaStream? _mic;
   Timer? _statsTimer;
   int _lastBytes = 0, _lastFrames = 0;
   DateTime _lastAt = DateTime.now();
@@ -55,9 +57,11 @@ class PeerClient {
     await pc.addTransceiver(
         kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
         init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly));
-    await pc.addTransceiver(
+    // Send+receive audio, but with no track until the mic is switched on:
+    // setMic() attaches or detaches it without renegotiating.
+    _audioTx = await pc.addTransceiver(
         kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
-        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly));
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv));
 
     _input = await pc.createDataChannel(
         'input', RTCDataChannelInit()..ordered = false..maxRetransmits = 0);
@@ -79,6 +83,33 @@ class PeerClient {
     final dc = _input;
     if (dc != null && dc.state == RTCDataChannelState.RTCDataChannelOpen) {
       dc.send(RTCDataChannelMessage(jsonEncode(e.toJson())));
+    }
+  }
+
+  /// Switch the microphone on or off. The mic is captured only while on.
+  Future<void> setMic(bool on) async {
+    final tx = _audioTx;
+    if (tx == null) return;
+    if (on) {
+      final stream = await navigator.mediaDevices.getUserMedia({
+        'audio': {
+          'echoCancellation': true, // keep the desktop's sound out of the mic
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': false,
+      });
+      _mic = stream;
+      await tx.sender.replaceTrack(stream.getAudioTracks().first);
+      // Capturing puts iOS in call mode, which routes sound to the earpiece.
+      await Helper.setSpeakerphoneOn(true);
+    } else {
+      await tx.sender.replaceTrack(null);
+      for (final t in _mic?.getTracks() ?? <MediaStreamTrack>[]) {
+        await t.stop();
+      }
+      await _mic?.dispose();
+      _mic = null;
     }
   }
 
@@ -134,6 +165,7 @@ class PeerClient {
 
   Future<void> close() async {
     _statsTimer?.cancel();
+    await setMic(false);
     await _input?.close();
     await _pc?.close();
     renderer.srcObject = null;
