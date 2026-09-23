@@ -88,14 +88,28 @@ class SessionStore extends ChangeNotifier {
       peer.onControlOpen = _controlOpen;
       peer.onControl = _onControl;
 
+      // Candidates can arrive before the answer is applied (saving the pairing
+      // token is async): hold them until it is, or they are rejected and lost.
+      var answered = false;
+      final early = <Map<String, dynamic>>[];
       sig.onMessage = (m) async {
         switch (m.type) {
           case 'answer':
-            if (m.pair != null) await _savePair(m.pair!);
             if (m.sdp != null) await peer.setAnswer(m.sdp!);
+            answered = true;
+            for (final c in early) {
+              await peer.addCandidate(c);
+            }
+            early.clear();
+            if (m.pair != null) await _savePair(m.pair!);
             break;
           case 'ice':
-            if (m.candidate != null) await peer.addCandidate(m.candidate!);
+            if (m.candidate == null) break;
+            if (answered) {
+              await peer.addCandidate(m.candidate!);
+            } else {
+              early.add(m.candidate!);
+            }
             break;
           case 'error':
             final err = (m.error ?? '').toLowerCase();
@@ -230,6 +244,9 @@ class SessionStore extends ChangeNotifier {
         await toggleMic();
         if (!micOn) return;
         _micByVoice = true;
+        // the phone's audio takes a moment to start flowing: don't let the
+        // desk start listening (and its 8 s timeout) before it does
+        await Future.delayed(const Duration(milliseconds: 600));
       }
       voiceOn = true;
       voicePanel = true;

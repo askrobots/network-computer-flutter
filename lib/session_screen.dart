@@ -45,7 +45,10 @@ class _SessionScreenState extends State<SessionScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
+        // expand: the only unpositioned child is the zero-size hidden text field,
+        // so a loose Stack collapsed to 0x0 and the whole session drew black
         child: Stack(
+          fit: StackFit.expand,
           children: [
             // video + trackpad
             Positioned.fill(child: _trackpad(store)),
@@ -89,11 +92,13 @@ class _SessionScreenState extends State<SessionScreen> {
         onLongPressStart: (d) => _send(InputEvent('md', b: 0)),
         onLongPressEnd: (d) => _send(InputEvent('mu', b: 0)),
         onSecondaryTap: () { _send(InputEvent('md', b: 2)); _send(InputEvent('mu', b: 2)); },
-        child: RTCVideoView(store.renderer,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain),
+        child: _video(store),
       );
     });
   }
+
+  Widget _video(SessionStore store) => RTCVideoView(store.renderer,
+      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain);
 
   Widget _topBar(SessionStore store) {
     final s = store.stats;

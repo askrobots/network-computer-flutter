@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'protocol.dart';
 
@@ -46,10 +47,19 @@ class PeerClient {
     final pc = await createPeerConnection(config);
     _pc = pc;
 
-    pc.onTrack = (event) {
-      if (event.track.kind == 'video' && event.streams.isNotEmpty) {
-        renderer.srcObject = event.streams[0];
+    pc.onTrack = (event) async {
+      debugPrint('nc track: ${event.track.kind} streams=${event.streams.length}');
+      if (event.track.kind != 'video') return;
+      MediaStream stream;
+      if (event.streams.isNotEmpty) {
+        stream = event.streams[0];
+      } else {
+        // some platforms deliver the track without its stream: wrap it ourselves
+        stream = await createLocalMediaStream('remote-video');
+        await stream.addTrack(event.track);
       }
+      renderer.srcObject = stream;
+      debugPrint('nc renderer: textureId=${renderer.textureId} src=${renderer.srcObject?.id}');
     };
     pc.onIceCandidate = (c) {
       final m = c.toMap();
@@ -186,7 +196,16 @@ class PeerClient {
       s.jitterMs = ((inbound.values['jitter'] as num?) ?? 0).toDouble() * 1000;
     }
     onStats?.call(s);
+    if (!kReleaseMode && ++_polls % 5 == 0 && inbound != null) {   // every 5 s in debug/profile runs
+      final v = inbound.values;
+      debugPrint('nc video: bytes=${v['bytesReceived']} packets=${v['packetsReceived']} '
+          'framesReceived=${v['framesReceived']} decoded=${v['framesDecoded']} dropped=${v['framesDropped']} '
+          'size=${v['frameWidth']}x${v['frameHeight']} decoder=${v['decoderImplementation']} '
+          'keyframes=${v['keyFramesDecoded']} pli=${v['pliCount']} path=${s.path} '
+          'view=${renderer.videoWidth}x${renderer.videoHeight} texture=${renderer.textureId}');
+    }
   }
+  int _polls = 0;
 
   Future<void> close() async {
     _statsTimer?.cancel();

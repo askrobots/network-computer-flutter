@@ -37,6 +37,23 @@ class _ConnectScreenState extends State<ConnectScreen> {
       host = p.getString('host') ?? '';
       relayOnly = p.getBool('relay') ?? false;
     });
+    // Developer test hook: --dart-define=NC_AUTO_URL=... (and NC_AUTO_PASS,
+    // NC_AUTO_HOST, NC_AUTO_PIN) fills the form and connects, so a build can
+    // be checked end to end without typing. Values come from the command line
+    // at build time; nothing is stored in the source.
+    const autoUrl = String.fromEnvironment('NC_AUTO_URL');
+    if (autoUrl.isNotEmpty) {
+      setState(() {
+        url.text = autoUrl;
+        pass.text = const String.fromEnvironment('NC_AUTO_PASS');
+        pin.text = const String.fromEnvironment('NC_AUTO_PIN');
+        const h = String.fromEnvironment('NC_AUTO_HOST');
+        if (h.isNotEmpty) host = h;
+      });
+      await _refresh();
+      if (mounted) await _connect();
+      return;
+    }
     _refresh();
   }
 
