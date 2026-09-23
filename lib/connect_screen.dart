@@ -104,81 +104,98 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Widget build(BuildContext context) {
     final store = context.watch<SessionStore>();
     final connecting = store.state == ConnState.connecting;
+    final size = MediaQuery.sizeOf(context);
+    // sideways phone or tablet: two columns, so the form fits without scrolling
+    final wide = size.width > size.height && size.width >= 560;
+
+    final header = Row(children: [
+      Container(
+        width: wide ? 32 : 40, height: wide ? 32 : 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: const LinearGradient(colors: [Color(0xFF4C8DFF), Color(0xFF3AD29F)]),
+        ),
+        child: Icon(Icons.desktop_windows, size: wide ? 18 : 22),
+      ),
+      const SizedBox(width: 12),
+      Expanded(child: Text('Network Computer',
+          style: TextStyle(fontSize: wide ? 17 : 20, fontWeight: FontWeight.w600))),
+    ]);
+    final login = <Widget>[
+      _field(url, 'Rendezvous', hint: 'https://host:8765', dense: wide),
+      Row(children: [
+        Expanded(child: _field(user, 'User', dense: wide)),
+        const SizedBox(width: 10),
+        Expanded(child: _field(pass, 'Password', obscure: true, dense: wide)),
+      ]),
+    ];
+    final hostRow = Row(children: [
+      Expanded(
+        child: DropdownButtonFormField<String>(
+          initialValue: store.hosts.contains(host) ? host : null,
+          decoration: InputDecoration(labelText: 'Host', isDense: wide),
+          items: store.hosts.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
+          onChanged: (v) { setState(() => host = v ?? ''); _checkPaired(); },
+        ),
+      ),
+      IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+    ]);
+    final pinField = _field(pin, paired ? 'Host PIN (paired — not needed)' : 'Host PIN',
+        keyboard: TextInputType.number, dense: wide);
+    final fpField = _field(fp, 'TLS fingerprint (optional)',
+        hint: 'only for a self-signed secure-mode rendezvous', dense: wide);
+    final relay = SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: wide,
+      title: const Text('Force TURN relay'),
+      value: relayOnly,
+      onChanged: (v) => setState(() => relayOnly = v),
+    );
+    final connectButton = FilledButton(
+      onPressed: connecting ? null : _connect,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: connecting ? Text(store.status) : const Text('Connect'),
+      ),
+    );
+    final failure = store.state == ConnState.failed
+        ? Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(store.status, style: const TextStyle(color: Color(0xFFFF5D5D))),
+          )
+        : const SizedBox.shrink();
+
+    final Widget form = wide
+        ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Column(mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [header, const SizedBox(height: 10), ...login, fpField])),
+            const SizedBox(width: 24),
+            Expanded(child: Column(mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [hostRow, pinField, relay, connectButton, failure])),
+          ])
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header, const SizedBox(height: 20), ...login,
+              const SizedBox(height: 4), hostRow, pinField, fpField, relay,
+              const SizedBox(height: 8), connectButton, failure,
+            ],
+          );
+
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(children: [
-                      Container(
-                        width: 40, height: 40,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          gradient: const LinearGradient(
-                              colors: [Color(0xFF4C8DFF), Color(0xFF3AD29F)]),
-                        ),
-                        child: const Icon(Icons.desktop_windows, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(child: Text('Network Computer',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-                    ]),
-                    const SizedBox(height: 20),
-                    _field(url, 'Rendezvous', hint: 'https://host:8765'),
-                    Row(children: [
-                      Expanded(child: _field(user, 'User')),
-                      const SizedBox(width: 10),
-                      Expanded(child: _field(pass, 'Password', obscure: true)),
-                    ]),
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: store.hosts.contains(host) ? host : null,
-                          decoration: const InputDecoration(labelText: 'Host'),
-                          items: store.hosts
-                              .map((h) => DropdownMenuItem(value: h, child: Text(h)))
-                              .toList(),
-                          onChanged: (v) { setState(() => host = v ?? ''); _checkPaired(); },
-                        ),
-                      ),
-                      IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
-                    ]),
-                    _field(pin, paired ? 'Host PIN (paired — not needed)' : 'Host PIN',
-                        keyboard: TextInputType.number),
-                    _field(fp, 'TLS fingerprint (optional)',
-                        hint: 'only for a self-signed secure-mode rendezvous'),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Force TURN relay'),
-                      value: relayOnly,
-                      onChanged: (v) => setState(() => relayOnly = v),
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton(
-                      onPressed: connecting ? null : _connect,
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: connecting
-                            ? Text(store.status)
-                            : const Text('Connect'),
-                      ),
-                    ),
-                    if (store.state == ConnState.failed)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Text(store.status,
-                            style: const TextStyle(color: Color(0xFFFF5D5D))),
-                      ),
-                  ],
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(   // only needed with the keyboard up
+            padding: EdgeInsets.all(wide ? 10 : 24),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: wide ? 860 : 440),
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(wide ? 18 : 24, wide ? 12 : 24, wide ? 18 : 24, wide ? 12 : 24),
+                  child: form,
                 ),
               ),
             ),
@@ -189,16 +206,16 @@ class _ConnectScreenState extends State<ConnectScreen> {
   }
 
   Widget _field(TextEditingController c, String label,
-      {String? hint, bool obscure = false, TextInputType? keyboard}) {
+      {String? hint, bool obscure = false, TextInputType? keyboard, bool dense = false}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.symmetric(vertical: dense ? 3 : 6),
       child: TextField(
         controller: c,
         obscureText: obscure,
         keyboardType: keyboard,
         autocorrect: false,
         enableSuggestions: false,
-        decoration: InputDecoration(labelText: label, hintText: hint),
+        decoration: InputDecoration(labelText: label, hintText: hint, isDense: dense),
       ),
     );
   }

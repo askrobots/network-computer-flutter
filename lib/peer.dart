@@ -25,7 +25,8 @@ class PeerClient {
   RTCDataChannel? _input;
   RTCDataChannel? _ctl;
   RTCRtpTransceiver? _audioTx;
-  MediaStream? _mic;
+  // the microphone capture, opened once and kept for the app's life
+  static MediaStream? _mic;
   Timer? _statsTimer;
   int _lastBytes = 0, _lastFrames = 0;
   DateTime _lastAt = DateTime.now();
@@ -49,6 +50,10 @@ class PeerClient {
 
     pc.onTrack = (event) async {
       debugPrint('nc track: ${event.track.kind} streams=${event.streams.length}');
+      if (event.track.kind == 'audio') {
+        await _loudspeaker();
+        return;
+      }
       if (event.track.kind != 'video') return;
       MediaStream stream;
       if (event.streams.isNotEmpty) {
@@ -121,30 +126,49 @@ class PeerClient {
     }
   }
 
-  /// Switch the microphone on or off. The mic is captured only while on.
+  /// Switch the microphone on or off. The capture is opened once for the app
+  /// and kept: off detaches and mutes it, on reattaches it (to this session). Stopping and
+  /// reopening it on iOS left the mic sending nothing after the first time
+  /// (the desk heard no audio at all), which broke voice's automatic mic.
   Future<void> setMic(bool on) async {
     final tx = _audioTx;
     if (tx == null) return;
     if (on) {
-      final stream = await navigator.mediaDevices.getUserMedia({
-        'audio': {
-          'echoCancellation': true, // keep the desktop's sound out of the mic
-          'noiseSuppression': true,
-          'autoGainControl': true,
-        },
-        'video': false,
-      });
-      _mic = stream;
-      await tx.sender.replaceTrack(stream.getAudioTracks().first);
-      // Capturing puts iOS in call mode, which routes sound to the earpiece.
-      await Helper.setSpeakerphoneOn(true);
-    } else {
-      await tx.sender.replaceTrack(null);
-      for (final t in _mic?.getTracks() ?? <MediaStreamTrack>[]) {
-        await t.stop();
+      var stream = _mic;
+      if (stream == null) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          'audio': {
+            'echoCancellation': true, // keep the desktop's sound out of the mic
+            'noiseSuppression': true,
+            'autoGainControl': true,
+          },
+          'video': false,
+        });
+        _mic = stream;
       }
-      await _mic?.dispose();
-      _mic = null;
+      final track = stream.getAudioTracks().first;
+      track.enabled = true;
+      await tx.sender.replaceTrack(track);
+      debugPrint('nc mic: on (track ${track.id})');
+      // Capturing puts iOS in call mode, which routes sound to the earpiece.
+      await _loudspeaker();
+    } else {
+      for (final t in _mic?.getAudioTracks() ?? <MediaStreamTrack>[]) {
+        t.enabled = false;
+      }
+      await tx.sender.replaceTrack(null);
+      debugPrint('nc mic: off');
+    }
+  }
+
+  /// The desk's sound on the loudspeaker, or on headphones or Bluetooth when
+  /// connected: iOS otherwise picks the earpiece for a call-style session.
+  Future<void> _loudspeaker() async {
+    if (defaultTargetPlatform != TargetPlatform.iOS) return;
+    try {
+      await Helper.setSpeakerphoneOnButPreferBluetooth();
+    } catch (e) {
+      debugPrint('nc audio route: $e');
     }
   }
 
@@ -170,6 +194,9 @@ class PeerClient {
           break;
         case 'inbound-rtp':
           if (r.values['kind'] == 'video') inbound = r;
+          break;
+        case 'outbound-rtp':
+          if (r.values['kind'] == 'audio') _micSent = r.values['bytesSent'];
           break;
       }
     }
@@ -202,14 +229,15 @@ class PeerClient {
           'framesReceived=${v['framesReceived']} decoded=${v['framesDecoded']} dropped=${v['framesDropped']} '
           'size=${v['frameWidth']}x${v['frameHeight']} decoder=${v['decoderImplementation']} '
           'keyframes=${v['keyFramesDecoded']} pli=${v['pliCount']} path=${s.path} '
-          'view=${renderer.videoWidth}x${renderer.videoHeight} texture=${renderer.textureId}');
+          'view=${renderer.videoWidth}x${renderer.videoHeight} mic-bytes-sent=$_micSent');
     }
   }
   int _polls = 0;
+  Object? _micSent;
 
   Future<void> close() async {
     _statsTimer?.cancel();
-    await setMic(false);
+    await setMic(false);   // detached and muted; the capture itself stays open
     await _input?.close();
     await _ctl?.close();
     await _pc?.close();
