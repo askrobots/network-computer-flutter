@@ -11,7 +11,10 @@ class PeerStats {
   String codec = '?';
 }
 
-/// One WebRTC session to a host: receives video+audio, sends input on a data channel.
+/// One WebRTC session to a host: receives video+audio, sends input on an
+/// unreliable "input" channel, and uses a reliable "control" channel for
+/// everything that must arrive: screen size, keyboard layout, clipboard,
+/// voice, the launcher (the same messages as the browser client).
 class PeerClient {
   final List<IceServer> ice;
   final bool relayOnly;
@@ -19,6 +22,7 @@ class PeerClient {
 
   RTCPeerConnection? _pc;
   RTCDataChannel? _input;
+  RTCDataChannel? _ctl;
   RTCRtpTransceiver? _audioTx;
   MediaStream? _mic;
   Timer? _statsTimer;
@@ -28,6 +32,8 @@ class PeerClient {
   void Function(Map<String, dynamic> candidate)? onIceCandidate;
   void Function(RTCPeerConnectionState)? onState;
   void Function(PeerStats)? onStats;
+  void Function()? onControlOpen;
+  void Function(Map<String, dynamic>)? onControl;
 
   PeerClient(this.ice, this.relayOnly, this.renderer);
 
@@ -65,6 +71,25 @@ class PeerClient {
 
     _input = await pc.createDataChannel(
         'input', RTCDataChannelInit()..ordered = false..maxRetransmits = 0);
+    final ctl = await pc.createDataChannel('control', RTCDataChannelInit()); // reliable, ordered
+    _ctl = ctl;
+    ctl.onDataChannelState = (s) {
+      if (s == RTCDataChannelState.RTCDataChannelOpen) onControlOpen?.call();
+    };
+    ctl.onMessage = (m) {
+      if (m.isBinary) return;
+      try {
+        final v = jsonDecode(m.text);
+        if (v is Map<String, dynamic>) onControl?.call(v);
+      } catch (_) {}
+    };
+  }
+
+  bool get controlOpen => _ctl?.state == RTCDataChannelState.RTCDataChannelOpen;
+
+  /// Send on the reliable control channel (in order, never dropped).
+  void sendControl(Map<String, dynamic> m) {
+    if (controlOpen) _ctl!.send(RTCDataChannelMessage(jsonEncode(m)));
   }
 
   Future<String> createOffer() async {
@@ -167,6 +192,7 @@ class PeerClient {
     _statsTimer?.cancel();
     await setMic(false);
     await _input?.close();
+    await _ctl?.close();
     await _pc?.close();
     renderer.srcObject = null;
   }

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'protocol.dart';
@@ -15,6 +17,22 @@ class SessionStore extends ChangeNotifier {
   List<String> hosts = [];
   PeerStats stats = PeerStats();
   bool micOn = false;
+
+  // voice: the desk listens (nc-voice); here only the button and the transcript
+  bool voiceOn = false, voicePanel = false, keepListening = false;
+  String voiceState = 'Voice off';
+  final List<(String, String)> voiceLines = []; // (kind, text): heard, said, did, error
+  bool _micByVoice = false;
+  Timer? _micOffTimer;
+
+  /// A short message for the user (shown briefly by the session screen).
+  String notice = '';
+  int noticeSeq = 0;
+
+  // screen size chosen for the desk: null keeps the host's default
+  int? displayW, displayH;
+  double displayScale = 1;
+  String _clipIn = '';
 
   SignalingClient? _sig;
   PeerClient? _peer;
@@ -67,6 +85,8 @@ class SessionStore extends ChangeNotifier {
         }
       };
       peer.onStats = (st) { stats = st; notifyListeners(); };
+      peer.onControlOpen = _controlOpen;
+      peer.onControl = _onControl;
 
       sig.onMessage = (m) async {
         switch (m.type) {
@@ -121,6 +141,9 @@ class SessionStore extends ChangeNotifier {
 
   Future<void> _teardown() async {
     micOn = false;
+    voiceOn = false;
+    _micByVoice = false;
+    _micOffTimer?.cancel();
     await _peer?.close();
     _peer = null;
     _sig?.close();
@@ -128,6 +151,140 @@ class SessionStore extends ChangeNotifier {
   }
 
   void send(InputEvent e) => _peer?.send(e);
+
+  void _say(String msg) { notice = msg; noticeSeq++; notifyListeners(); }
+
+  Future<void> _controlOpen() async {
+    // keys arrive as US positions (see the session screen's key map)
+    _peer?.sendControl({'t': 'keyboard', 'layout': 'us'});
+    final p = await SharedPreferences.getInstance();
+    keepListening = p.getBool('voiceKeep') ?? false;
+    final w = p.getInt('displayW'), h = p.getInt('displayH');
+    if (w != null && h != null) {
+      setDisplay(w, h, p.getDouble('displayScale') ?? 1, save: false);
+    }
+    voiceOn = false;
+    notifyListeners();
+  }
+
+  void _onControl(Map<String, dynamic> m) {
+    switch (m['t']) {
+      case 'voice':
+        _onVoice('${m['kind'] ?? ''}', '${m['text'] ?? ''}');
+        break;
+      case 'clip': // the desk's clipboard, in pieces
+        _clipIn += '${m['text'] ?? ''}';
+        if (m['more'] == true) return;
+        final t = _clipIn;
+        _clipIn = '';
+        Clipboard.setData(ClipboardData(text: t));
+        _say('Copied from the desk');
+        break;
+      case 'clipnone':
+        _say("The desk's clipboard has no text");
+        break;
+    }
+  }
+
+  // ---------- voice ----------
+  static const _states = {
+    'listening': 'Listening…', 'hearing': 'Hearing you…',
+    'thinking': 'Thinking…', 'off': 'Voice off',
+  };
+
+  void _onVoice(String kind, String text) {
+    voicePanel = true;
+    if (kind == 'state') {
+      voiceState = _states[text] ?? text;
+      if (text == 'off') _voiceStopped();
+    } else {
+      voiceLines.add((kind, text));
+      if (voiceLines.length > 40) voiceLines.removeAt(0);
+      if (kind == 'error' && text.contains('not running')) _voiceStopped();
+    }
+    notifyListeners();
+  }
+
+  void _voiceStopped() {
+    voiceOn = false;
+    voiceState = 'Voice off';
+    if (_micByVoice) {
+      // the reply's last words are still on their way: stop the mic a bit later
+      _micOffTimer?.cancel();
+      _micOffTimer = Timer(const Duration(milliseconds: 1500), () async {
+        if (!voiceOn && _micByVoice && micOn) {
+          _micByVoice = false;
+          await toggleMic();
+        }
+      });
+    }
+  }
+
+  /// One tap, one phrase (or continuous with keepListening). Turns the mic on if needed.
+  Future<void> toggleVoice() async {
+    final peer = _peer;
+    if (peer == null || !peer.controlOpen) return;
+    _micOffTimer?.cancel();
+    if (!voiceOn) {
+      if (!micOn) {
+        await toggleMic();
+        if (!micOn) return;
+        _micByVoice = true;
+      }
+      voiceOn = true;
+      voicePanel = true;
+      voiceState = keepListening ? 'Starting…' : 'Say one thing…';
+      peer.sendControl({'t': 'voice', 'on': true, 'once': !keepListening});
+    } else {
+      peer.sendControl({'t': 'voice', 'on': false});
+      _voiceStopped();
+    }
+    notifyListeners();
+  }
+
+  Future<void> setKeepListening(bool v) async {
+    keepListening = v;
+    (await SharedPreferences.getInstance()).setBool('voiceKeep', v);
+    notifyListeners();
+  }
+
+  void hideVoicePanel() { voicePanel = false; notifyListeners(); }
+
+  // ---------- launcher, screen, clipboard ----------
+  void launch() => _peer?.sendControl({'t': 'launch'});
+
+  Future<void> setDisplay(int w, int h, double scale, {bool save = true}) async {
+    displayW = w; displayH = h; displayScale = scale;
+    _peer?.sendControl({'t': 'display', 'w': w, 'h': h, 's': scale});
+    if (save) {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt('displayW', w);
+      await p.setInt('displayH', h);
+      await p.setDouble('displayScale', scale);
+      _say('Screen $w×$h at ${(scale * 100).round()}%');
+    }
+    notifyListeners();
+  }
+
+  /// This device's clipboard to the desk (then paste there as usual).
+  Future<void> sendClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text ?? '';
+    if (text.isEmpty) { _say('No text on this clipboard'); return; }
+    const piece = 4096;
+    var i = 0;
+    while (i < text.length) {
+      var end = i + piece < text.length ? i + piece : text.length;
+      // keep surrogate pairs together
+      if (end < text.length && (text.codeUnitAt(end - 1) & 0xFC00) == 0xD800) end--;
+      _peer?.sendControl({'t': 'clip', 'text': text.substring(i, end), 'more': end < text.length});
+      i = end;
+    }
+    _say('Clipboard sent to the desk');
+  }
+
+  /// The desk's clipboard to this device.
+  void getClipboard() => _peer?.sendControl({'t': 'clipnow'});
 
   Future<void> toggleMic() async {
     final want = !micOn;
