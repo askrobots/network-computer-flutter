@@ -7,6 +7,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'protocol.dart';
 import 'signaling.dart';
+import 'secrets.dart';
 import 'peer.dart';
 
 enum ConnState { idle, connecting, connected, failed }
@@ -365,16 +366,13 @@ class SessionStore extends ChangeNotifier {
   // Pairing: after a correct PIN the host returns a signed token; keep one per
   // rendezvous+host and offer it next time so the PIN is typed once.
   String _pairKey() => 'pair:${_ep!.base}|$_host';
-  Future<String?> _loadPair() async =>
-      (await SharedPreferences.getInstance()).getString(_pairKey());
-  Future<void> _savePair(String t) async =>
-      (await SharedPreferences.getInstance()).setString(_pairKey(), t);
-  Future<void> _clearPair() async =>
-      (await SharedPreferences.getInstance()).remove(_pairKey());
+  Future<String?> _loadPair() => Secrets.read(_pairKey());
+  Future<void> _savePair(String t) => Secrets.write(_pairKey(), t);
+  Future<void> _clearPair() => Secrets.delete(_pairKey());
 
   /// Whether a pairing token is stored for [ep] + [host] (for the UI hint).
   static Future<bool> isPaired(Endpoint ep, String host) async =>
-      (await SharedPreferences.getInstance()).getString('pair:${ep.base}|$host') != null;
+      await Secrets.read('pair:${ep.base}|$host') != null;
 
   void _set(ConnState s, String msg) { state = s; status = msg; notifyListeners(); }
   void _fail(String msg) { state = ConnState.failed; status = msg; notifyListeners(); }

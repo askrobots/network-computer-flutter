@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'signaling.dart';
 import 'session_store.dart';
+import 'secrets.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -32,11 +33,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
     setState(() {
       url.text = p.getString('url') ?? 'https://';
       user.text = p.getString('user') ?? 'nc';
-      pass.text = p.getString('pass') ?? '';
+      pass.text = '';
       fp.text = p.getString('fp') ?? '';
       host = p.getString('host') ?? '';
       relayOnly = p.getBool('relay') ?? false;
     });
+    final saved = await Secrets.read('pass');   // the keychain (moved there from preferences)
+    if (mounted && saved != null) setState(() => pass.text = saved);
     // Developer test hook: --dart-define=NC_AUTO_URL=... (and NC_AUTO_PASS,
     // NC_AUTO_HOST, NC_AUTO_PIN) fills the form and connects, so a build can
     // be checked end to end without typing. Values come from the command line
@@ -61,7 +64,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final p = await SharedPreferences.getInstance();
     await p.setString('url', url.text);
     await p.setString('user', user.text);
-    await p.setString('pass', pass.text);
+    await Secrets.write('pass', pass.text);
     await p.setString('fp', fp.text);
     await p.setString('host', host);
     await p.setBool('relay', relayOnly);
