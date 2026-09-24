@@ -137,12 +137,14 @@ class _SessionScreenState extends State<SessionScreen> {
               switch (v) {
                 case 'screen': _screenSheet(); break;
                 case 'clipup': store.sendClipboard(); break;
+                case 'files': store.sendFiles(); break;
                 case 'clipdown': store.getClipboard(); break;
                 case 'stats': setState(() => showStats = !showStats); break;
               }
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'screen', child: ListTile(leading: Icon(Icons.monitor), title: Text('Screen size…'))),
+              PopupMenuItem(value: 'files', child: ListTile(leading: Icon(Icons.upload_file), title: Text('Send a photo or file to the desk'))),
               PopupMenuItem(value: 'clipup', child: ListTile(leading: Icon(Icons.upload), title: Text("Send this clipboard to the desk"))),
               PopupMenuItem(value: 'clipdown', child: ListTile(leading: Icon(Icons.download), title: Text("Get the desk's clipboard"))),
               PopupMenuItem(value: 'stats', child: ListTile(leading: Icon(Icons.bar_chart), title: Text('Stats'))),

@@ -24,9 +24,10 @@ class PeerClient {
   RTCPeerConnection? _pc;
   RTCDataChannel? _input;
   RTCDataChannel? _ctl;
-  RTCRtpTransceiver? _audioTx;
-  // the microphone capture, opened once and kept for the app's life
-  static MediaStream? _mic;
+  RTCDataChannel? _file;          // opened with the others: later ones never report open here
+  Completer<String>? _fileAnswer;
+  Future<void> _fileQueue = Future.value();
+  MediaStream? _mic;
   Timer? _statsTimer;
   int _lastBytes = 0, _lastFrames = 0;
   DateTime _lastAt = DateTime.now();
@@ -50,10 +51,6 @@ class PeerClient {
 
     pc.onTrack = (event) async {
       debugPrint('nc track: ${event.track.kind} streams=${event.streams.length}');
-      if (event.track.kind == 'audio') {
-        await _loudspeaker();
-        return;
-      }
       if (event.track.kind != 'video') return;
       MediaStream stream;
       if (event.streams.isNotEmpty) {
@@ -78,14 +75,42 @@ class PeerClient {
     await pc.addTransceiver(
         kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
         init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly));
-    // Send+receive audio, but with no track until the mic is switched on:
-    // setMic() attaches or detaches it without renegotiating.
-    _audioTx = await pc.addTransceiver(
-        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
-        init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv));
+    // The microphone is opened with the connection and attached muted; the mic
+    // button only unmutes it. Attaching a track later (replaceTrack) left the
+    // iPhone sending no audio at all. No permission: the call works without.
+    MediaStreamTrack? micTrack;
+    try {
+      final mic = await navigator.mediaDevices.getUserMedia({
+        'audio': {
+          'echoCancellation': true, // keep the desktop's sound out of the mic
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': false,
+      });
+      _mic = mic;
+      micTrack = mic.getAudioTracks().first;
+      micTrack.enabled = false;
+    } catch (e) {
+      debugPrint('nc mic: unavailable ($e)');
+    }
+    final init = RTCRtpTransceiverInit(
+        direction: TransceiverDirection.SendRecv, streams: _mic == null ? [] : [_mic!]);
+    if (micTrack != null) {
+      await pc.addTransceiver(track: micTrack, kind: RTCRtpMediaType.RTCRtpMediaTypeAudio, init: init);
+    } else {
+      await pc.addTransceiver(kind: RTCRtpMediaType.RTCRtpMediaTypeAudio, init: init);
+    }
+    await _loudspeaker(); // capturing puts iOS in call mode: earpiece otherwise
 
     _input = await pc.createDataChannel(
         'input', RTCDataChannelInit()..ordered = false..maxRetransmits = 0);
+    final file = await pc.createDataChannel('file', RTCDataChannelInit()); // reliable, ordered
+    _file = file;
+    file.onMessage = (m) {
+      final a = _fileAnswer;
+      if (a != null && !a.isCompleted && !m.isBinary) a.complete(m.text);
+    };
     final ctl = await pc.createDataChannel('control', RTCDataChannelInit()); // reliable, ordered
     _ctl = ctl;
     ctl.onDataChannelState = (s) {
@@ -98,6 +123,37 @@ class PeerClient {
         if (v is Map<String, dynamic>) onControl?.call(v);
       } catch (_) {}
     };
+  }
+
+  /// Send a file to the desk (saved on its Desktop): its own reliable channel,
+  /// a JSON header, 16 KB pieces with flow control, then "end"; the desk
+  /// answers "ok NAME" or "error: WHY". Same as the browser's file drop.
+  Future<String> sendFile(String name, Uint8List data, void Function(double) progress) {
+    // one file at a time on the file channel
+    final done = _fileQueue.then((_) => _sendFileNow(name, data, progress));
+    _fileQueue = done.then((_) {}, onError: (_) {});
+    return done;
+  }
+
+  Future<String> _sendFileNow(String name, Uint8List data, void Function(double) progress) async {
+    final ch = _file;
+    if (ch == null || ch.state != RTCDataChannelState.RTCDataChannelOpen) {
+      throw 'the file channel is not open';
+    }
+    final answer = Completer<String>();
+    _fileAnswer = answer;
+    await ch.send(RTCDataChannelMessage(jsonEncode({'name': name, 'size': data.length})));
+    const piece = 16 * 1024;
+    for (var i = 0; i < data.length && !answer.isCompleted; i += piece) {
+      while ((ch.bufferedAmount ?? 0) > 4 * 1024 * 1024) {
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+      final end = i + piece < data.length ? i + piece : data.length;
+      await ch.send(RTCDataChannelMessage.fromBinary(data.sublist(i, end)));
+      progress(end / data.length);
+    }
+    if (!answer.isCompleted) await ch.send(RTCDataChannelMessage('end'));
+    return answer.future.timeout(const Duration(minutes: 2));
   }
 
   bool get controlOpen => _ctl?.state == RTCDataChannelState.RTCDataChannelOpen;
@@ -126,47 +182,33 @@ class PeerClient {
     }
   }
 
-  /// Switch the microphone on or off. The capture is opened once for the app
-  /// and kept: off detaches and mutes it, on reattaches it (to this session). Stopping and
-  /// reopening it on iOS left the mic sending nothing after the first time
-  /// (the desk heard no audio at all), which broke voice's automatic mic.
+  /// Mute or unmute the microphone (opened with the connection).
   Future<void> setMic(bool on) async {
-    final tx = _audioTx;
-    if (tx == null) return;
-    if (on) {
-      var stream = _mic;
-      if (stream == null) {
-        stream = await navigator.mediaDevices.getUserMedia({
-          'audio': {
-            'echoCancellation': true, // keep the desktop's sound out of the mic
-            'noiseSuppression': true,
-            'autoGainControl': true,
-          },
-          'video': false,
-        });
-        _mic = stream;
-      }
-      final track = stream.getAudioTracks().first;
-      track.enabled = true;
-      await tx.sender.replaceTrack(track);
-      debugPrint('nc mic: on (track ${track.id})');
-      // Capturing puts iOS in call mode, which routes sound to the earpiece.
-      await _loudspeaker();
-    } else {
-      for (final t in _mic?.getAudioTracks() ?? <MediaStreamTrack>[]) {
-        t.enabled = false;
-      }
-      await tx.sender.replaceTrack(null);
-      debugPrint('nc mic: off');
+    final tracks = _mic?.getAudioTracks() ?? <MediaStreamTrack>[];
+    if (tracks.isEmpty) {
+      if (on) throw 'no microphone (allow it in Settings, then reconnect)';
+      return;
     }
+    for (final t in tracks) {
+      t.enabled = on;
+    }
+    debugPrint('nc mic: ${on ? 'on' : 'off'}');
   }
 
-  /// The desk's sound on the loudspeaker, or on headphones or Bluetooth when
-  /// connected: iOS otherwise picks the earpiece for a call-style session.
+  Future<void> _closeMic() async {
+    for (final t in _mic?.getTracks() ?? <MediaStreamTrack>[]) {
+      await t.stop();
+    }
+    await _mic?.dispose();
+    _mic = null;
+  }
+
+  /// The desk's sound on the loudspeaker: iOS otherwise picks the earpiece for
+  /// a call-style session.
   Future<void> _loudspeaker() async {
     if (defaultTargetPlatform != TargetPlatform.iOS) return;
     try {
-      await Helper.setSpeakerphoneOnButPreferBluetooth();
+      await Helper.setSpeakerphoneOn(true);
     } catch (e) {
       debugPrint('nc audio route: $e');
     }
@@ -237,8 +279,9 @@ class PeerClient {
 
   Future<void> close() async {
     _statsTimer?.cancel();
-    await setMic(false);   // detached and muted; the capture itself stays open
+    await _closeMic();
     await _input?.close();
+    await _file?.close();
     await _ctl?.close();
     await _pc?.close();
     renderer.srcObject = null;

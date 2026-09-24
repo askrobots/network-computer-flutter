@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'protocol.dart';
@@ -179,6 +181,21 @@ class SessionStore extends ChangeNotifier {
     }
     voiceOn = false;
     notifyListeners();
+    // Developer test hook (--dart-define=NC_AUTO_VOICE=true): press the voice
+    // button once, 3 s after connecting, so the mic path can be checked
+    // end to end without a hand on the screen.
+    if (const bool.fromEnvironment('NC_AUTO_VOICE')) {
+      Future.delayed(const Duration(seconds: 3), toggleVoice);
+    }
+    // (--dart-define=NC_AUTO_SEND=/path/file): send that file after connecting.
+    const autoSend = String.fromEnvironment('NC_AUTO_SEND');
+    if (autoSend.isNotEmpty) {
+      Future.delayed(const Duration(seconds: 2), () async {
+        final data = File(autoSend).readAsBytesSync();
+        await _sendBytes(autoSend.split('/').last, data);   // twice: the channel is reused
+        await _sendBytes(autoSend.split('/').last, data);
+      });
+    }
   }
 
   void _onControl(Map<String, dynamic> m) {
@@ -298,6 +315,36 @@ class SessionStore extends ChangeNotifier {
       i = end;
     }
     _say('Clipboard sent to the desk');
+  }
+
+  /// Photos, videos or files from this device to the desk's Desktop.
+  Future<void> sendFiles() async {
+    final peer = _peer;
+    if (peer == null) return;
+    final picked = await FilePicker.pickFiles(allowMultiple: true, withData: true);
+    if (picked == null) return;
+    for (final f in picked.files) {
+      final data = f.bytes;
+      if (data == null) { _say('${f.name}: could not read it'); continue; }
+      await _sendBytes(f.name, data);
+    }
+  }
+
+  Future<void> _sendBytes(String name, Uint8List data) async {
+    final peer = _peer;
+    if (peer == null) return;
+    try {
+      var shown = 0;
+      final r = await peer.sendFile(name, data, (p) {
+        final pct = (p * 100).round();
+        if (pct >= shown + 20) { shown = pct; _say('Sending $name: $pct%'); }
+      });
+      debugPrint('nc file: $name -> $r');
+      _say(r.startsWith('ok ') ? "On the desk's Desktop: ${r.substring(3)}" : '$name: $r');
+    } catch (e) {
+      debugPrint('nc file: $name failed: $e');
+      _say('$name: $e');
+    }
   }
 
   /// The desk's clipboard to this device.
