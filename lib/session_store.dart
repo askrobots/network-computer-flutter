@@ -180,6 +180,12 @@ class SessionStore extends ChangeNotifier {
   Future<void> _controlOpen() async {
     // keys arrive as US positions (see the session screen's key map)
     _peer?.sendControl({'t': 'keyboard', 'layout': 'us'});
+    // the desk's clock follows this device (Etc/GMT+4 is UTC-4: the sign is inverted)
+    final off = DateTime.now().timeZoneOffset;
+    if (off.inMinutes % 60 == 0) {
+      final h = -off.inHours;
+      _peer?.sendControl({'t': 'tz', 'text': h == 0 ? 'Etc/UTC' : 'Etc/GMT${h > 0 ? '+' : ''}$h'});
+    }
     final p = await SharedPreferences.getInstance();
     keepListening = p.getBool('voiceKeep') ?? false;
     final w = p.getInt('displayW'), h = p.getInt('displayH');
