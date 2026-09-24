@@ -27,7 +27,19 @@ class _SessionScreenState extends State<SessionScreen> {
   void _send(InputEvent e) => context.read<SessionStore>().send(e);
 
   @override
-  void dispose() { _focus.dispose(); _hidden.dispose(); super.dispose(); }
+  void initState() {
+    super.initState();
+    // Hardware keyboards (iPad, Bluetooth, USB, this Mac) are caught here,
+    // whatever has focus: tapping the voice button used to take focus from
+    // the hidden text field, and keys stopped reaching the desk.
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    _focus.dispose(); _hidden.dispose(); super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +69,7 @@ class _SessionScreenState extends State<SessionScreen> {
               offstage: true,
               child: KeyboardListener(
                 focusNode: _focus,
-                onKeyEvent: _onKey,
+                onKeyEvent: (_) {},   // keys are handled by _onHardwareKey
                 child: TextField(controller: _hidden),
               ),
             ),
@@ -335,33 +347,64 @@ class _SessionScreenState extends State<SessionScreen> {
         ),
       );
 
-  void _onKey(KeyEvent e) {
-    if (e is KeyRepeatEvent) return;
-    final code = _mapKey(e.logicalKey);
-    if (code == null) return;
-    _send(InputEvent(e is KeyDownEvent ? 'kd' : 'ku', code: code));
+  final Map<LogicalKeyboardKey, String> _downAs = {};   // so each keyup matches its keydown
+
+  bool _onHardwareKey(KeyEvent e) {
+    if (!mounted) return false;
+    if (e is KeyRepeatEvent) return true;
+    if (e is KeyUpEvent) {
+      final code = _downAs.remove(e.logicalKey);
+      if (code != null) _send(InputEvent('ku', code: code));
+      return code != null;
+    }
+    final code = _mapKey(e);
+    if (code == null) return false;
+    _downAs[e.logicalKey] = code;
+    _send(InputEvent('kd', code: code));
+    return true;
   }
 
-  String? _mapKey(LogicalKeyboardKey k) {
-    final label = k.keyLabel;
-    if (label.length == 1) {
-      final c = label.toUpperCase().codeUnitAt(0);
-      if (c >= 65 && c <= 90) return 'Key${label.toUpperCase()}';
-      if (c >= 48 && c <= 57) return 'Digit$label';
+  // Characters go as the US key that types them (the desk stays US), so any
+  // layout works; the rest by name. Cmd acts as Ctrl on the desk.
+  static const _usCode = {
+    '!': 'Digit1', '@': 'Digit2', '#': 'Digit3', r'$': 'Digit4', '%': 'Digit5', '^': 'Digit6',
+    '&': 'Digit7', '*': 'Digit8', '(': 'Digit9', ')': 'Digit0', '`': 'Backquote', '~': 'Backquote',
+    '-': 'Minus', '_': 'Minus', '=': 'Equal', '+': 'Equal', '[': 'BracketLeft', '{': 'BracketLeft',
+    ']': 'BracketRight', '}': 'BracketRight', '\\': 'Backslash', '|': 'Backslash', ';': 'Semicolon',
+    ':': 'Semicolon', "'": 'Quote', '"': 'Quote', ',': 'Comma', '<': 'Comma', '.': 'Period',
+    '>': 'Period', '/': 'Slash', '?': 'Slash', ' ': 'Space',
+  };
+  static final _named = {
+    LogicalKeyboardKey.enter: 'Enter', LogicalKeyboardKey.numpadEnter: 'Enter',
+    LogicalKeyboardKey.backspace: 'Backspace', LogicalKeyboardKey.delete: 'Delete',
+    LogicalKeyboardKey.tab: 'Tab', LogicalKeyboardKey.escape: 'Escape', LogicalKeyboardKey.space: 'Space',
+    LogicalKeyboardKey.arrowUp: 'ArrowUp', LogicalKeyboardKey.arrowDown: 'ArrowDown',
+    LogicalKeyboardKey.arrowLeft: 'ArrowLeft', LogicalKeyboardKey.arrowRight: 'ArrowRight',
+    LogicalKeyboardKey.home: 'Home', LogicalKeyboardKey.end: 'End',
+    LogicalKeyboardKey.pageUp: 'PageUp', LogicalKeyboardKey.pageDown: 'PageDown',
+    LogicalKeyboardKey.shiftLeft: 'ShiftLeft', LogicalKeyboardKey.shiftRight: 'ShiftRight',
+    LogicalKeyboardKey.controlLeft: 'ControlLeft', LogicalKeyboardKey.controlRight: 'ControlRight',
+    LogicalKeyboardKey.altLeft: 'AltLeft', LogicalKeyboardKey.altRight: 'AltRight',
+    LogicalKeyboardKey.metaLeft: 'ControlLeft', LogicalKeyboardKey.metaRight: 'ControlRight',
+    LogicalKeyboardKey.capsLock: 'CapsLock',
+    LogicalKeyboardKey.f1: 'F1', LogicalKeyboardKey.f2: 'F2', LogicalKeyboardKey.f3: 'F3',
+    LogicalKeyboardKey.f4: 'F4', LogicalKeyboardKey.f5: 'F5', LogicalKeyboardKey.f6: 'F6',
+    LogicalKeyboardKey.f7: 'F7', LogicalKeyboardKey.f8: 'F8', LogicalKeyboardKey.f9: 'F9',
+    LogicalKeyboardKey.f10: 'F10', LogicalKeyboardKey.f11: 'F11', LogicalKeyboardKey.f12: 'F12',
+  };
+
+  String? _mapKey(KeyEvent e) {
+    final named = _named[e.logicalKey];
+    if (named != null) return named;
+    var ch = e.character;
+    if (ch == null || ch.isEmpty || ch.codeUnitAt(0) < 32) {   // with Ctrl held: a control code
+      final l = e.logicalKey.keyLabel;
+      ch = l.length == 1 ? l.toLowerCase() : null;
     }
-    if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) return 'Enter';
-    if (k == LogicalKeyboardKey.space) return 'Space';
-    if (k == LogicalKeyboardKey.backspace) return 'Backspace';
-    if (k == LogicalKeyboardKey.tab) return 'Tab';
-    if (k == LogicalKeyboardKey.escape) return 'Escape';
-    if (k == LogicalKeyboardKey.arrowUp) return 'ArrowUp';
-    if (k == LogicalKeyboardKey.arrowDown) return 'ArrowDown';
-    if (k == LogicalKeyboardKey.arrowLeft) return 'ArrowLeft';
-    if (k == LogicalKeyboardKey.arrowRight) return 'ArrowRight';
-    if (k == LogicalKeyboardKey.period) return 'Period';
-    if (k == LogicalKeyboardKey.comma) return 'Comma';
-    if (k == LogicalKeyboardKey.slash) return 'Slash';
-    if (k == LogicalKeyboardKey.minus) return 'Minus';
-    return null;
+    if (ch == null || ch.length != 1) return null;
+    final c = ch.toUpperCase().codeUnitAt(0);
+    if (c >= 65 && c <= 90) return 'Key${ch.toUpperCase()}';
+    if (c >= 48 && c <= 57) return 'Digit$ch';
+    return _usCode[ch];
   }
 }
