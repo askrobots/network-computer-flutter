@@ -89,6 +89,12 @@ class SessionStore extends ChangeNotifier {
       };
       peer.onStats = (st) { stats = st; notifyListeners(); };
       peer.onControlOpen = _controlOpen;
+      peer.onFileReceived = (path, note) {
+        debugPrint('nc file in: $note -> $path');
+        _say(path == null ? 'Not saved: $note'
+            : defaultTargetPlatform == TargetPlatform.iOS ? 'From the desk: $note (Files › Network Computer)'
+            : 'From the desk: $note ($path)');
+      };
       peer.onControl = _onControl;
 
       // Candidates can arrive before the answer is applied (saving the pairing

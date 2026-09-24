@@ -7,6 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// versions in preferences are moved there on first read. If the keychain
 /// can't be used, preferences stay in use: a credential is never lost.
 class Secrets {
+  /// Developer test runs (--dart-define=NC_AUTO_URL=...) keep credentials in
+  /// memory only: each test build is signed differently, and macOS would ask
+  /// for keychain access every time.
+  static final bool memoryOnly = const String.fromEnvironment('NC_AUTO_URL').isNotEmpty;
+  static final Map<String, String> _memory = {};
+
   static const _store = FlutterSecureStorage(
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
     // the login keychain: the data-protection one needs a signed entitlement
@@ -16,6 +22,7 @@ class Secrets {
   );
 
   static Future<String?> read(String key) async {
+    if (memoryOnly) return _memory[key];
     final p = await SharedPreferences.getInstance();
     try {
       final v = await _store.read(key: key);
@@ -33,6 +40,7 @@ class Secrets {
   }
 
   static Future<void> write(String key, String value) async {
+    if (memoryOnly) { _memory[key] = value; return; }
     try {
       await _store.write(key: key, value: value);
       (await SharedPreferences.getInstance()).remove(key);
@@ -43,6 +51,7 @@ class Secrets {
   }
 
   static Future<void> delete(String key) async {
+    if (memoryOnly) { _memory.remove(key); return; }
     try {
       await _store.delete(key: key);
     } catch (_) {}

@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'protocol.dart';
@@ -25,6 +28,10 @@ class PeerClient {
   RTCDataChannel? _input;
   RTCDataChannel? _ctl;
   RTCDataChannel? _file;          // opened with the others: later ones never report open here
+  RTCDataChannel? _fileIn;        // files from the desk
+  String? _inName;
+  int _inSize = 0;
+  BytesBuilder? _inData;
   Completer<String>? _fileAnswer;
   Future<void> _fileQueue = Future.value();
   MediaStream? _mic;
@@ -36,6 +43,8 @@ class PeerClient {
   void Function(RTCPeerConnectionState)? onState;
   void Function(PeerStats)? onStats;
   void Function()? onControlOpen;
+  /// A file from the desk was saved (its path), or failed (null, reason).
+  void Function(String? path, String note)? onFileReceived;
   void Function(Map<String, dynamic>)? onControl;
 
   PeerClient(this.ice, this.relayOnly, this.renderer);
@@ -111,6 +120,10 @@ class PeerClient {
       final a = _fileAnswer;
       if (a != null && !a.isCompleted && !m.isBinary) a.complete(m.text);
     };
+    // files from the desk ("Send to my device") arrive on a channel we open
+    final fileIn = await pc.createDataChannel('file-in', RTCDataChannelInit());
+    _fileIn = fileIn;
+    fileIn.onMessage = _onFileIn;
     final ctl = await pc.createDataChannel('control', RTCDataChannelInit()); // reliable, ordered
     _ctl = ctl;
     ctl.onDataChannelState = (s) {
@@ -154,6 +167,51 @@ class PeerClient {
     }
     if (!answer.isCompleted) await ch.send(RTCDataChannelMessage('end'));
     return answer.future.timeout(const Duration(minutes: 2));
+  }
+
+  /// A file from the desk: header, pieces, "end"; saved in the app's Documents
+  /// (on iPhone: Files › On My iPhone › Network Computer); answers "ok NAME".
+  Future<void> _onFileIn(RTCDataChannelMessage m) async {
+    final ch = _fileIn;
+    if (ch == null) return;
+    if (m.isBinary) {
+      _inData?.add(m.binary);
+      return;
+    }
+    if (m.text != 'end') {
+      try {
+        final h = jsonDecode(m.text) as Map<String, dynamic>;
+        _inName = '${h['name']}'.split('/').last.split('\\').last;
+        _inSize = (h['size'] as num).toInt();
+        _inData = BytesBuilder(copy: false);
+      } catch (_) {
+        await ch.send(RTCDataChannelMessage('error: bad header'));
+      }
+      return;
+    }
+    final name = _inName, data = _inData;
+    _inName = null; _inData = null;
+    if (name == null || data == null) return;
+    if (data.length != _inSize) {
+      await ch.send(RTCDataChannelMessage('error: got ${data.length} of $_inSize bytes'));
+      onFileReceived?.call(null, '$name did not arrive whole');
+      return;
+    }
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      var path = '${dir.path}/$name';
+      final dot = name.lastIndexOf('.');
+      final stem = dot > 0 ? name.substring(0, dot) : name, ext = dot > 0 ? name.substring(dot) : '';
+      for (var i = 2; File(path).existsSync(); i++) {
+        path = '${dir.path}/$stem ($i)$ext';
+      }
+      await File(path).writeAsBytes(data.takeBytes());
+      await ch.send(RTCDataChannelMessage('ok ${path.split('/').last}'));
+      onFileReceived?.call(path, path.split('/').last);
+    } catch (e) {
+      await ch.send(RTCDataChannelMessage('error: $e'));
+      onFileReceived?.call(null, '$name: $e');
+    }
   }
 
   bool get controlOpen => _ctl?.state == RTCDataChannelState.RTCDataChannelOpen;
@@ -282,6 +340,7 @@ class PeerClient {
     await _closeMic();
     await _input?.close();
     await _file?.close();
+    await _fileIn?.close();
     await _ctl?.close();
     await _pc?.close();
     renderer.srcObject = null;
