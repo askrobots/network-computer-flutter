@@ -95,6 +95,7 @@ class _SessionScreenState extends State<SessionScreen> {
   Widget _trackpad(SessionStore store) => TouchPad(
         videoSize: () => Size(store.renderer.videoWidth.toDouble(), store.renderer.videoHeight.toDouble()),
         onEvent: _send,
+        onInputKind: store.reportInput,
         sensitivity: sensitivity,
         child: _video(store),
       );

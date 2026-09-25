@@ -23,6 +23,7 @@ class TouchPad extends StatefulWidget {
     required this.child,
     required this.videoSize,
     required this.onEvent,
+    this.onInputKind,
     this.sensitivity = 2.0,
   });
 
@@ -30,6 +31,10 @@ class TouchPad extends StatefulWidget {
   final Size Function()
   videoSize; // the desk picture's size in pixels (0x0 until known)
   final void Function(InputEvent) onEvent;
+
+  /// "touch" or "pointer" (mouse, trackpad, pen) at every press: the desk's
+  /// apps suit their controls to it.
+  final void Function(String kind)? onInputKind;
   final double sensitivity;
 
   @override
@@ -86,6 +91,7 @@ class _TouchPadState extends State<TouchPad> {
         _box = Size(box.maxWidth, box.maxHeight);
         return Listener(
           onPointerDown: (e) {
+            widget.onInputKind?.call(e.kind == PointerDeviceKind.touch ? 'touch' : 'pointer');
             if (e.kind != PointerDeviceKind.touch) {
               _mostTouches = 0; // a mouse click is never part of a finger tap
               return;

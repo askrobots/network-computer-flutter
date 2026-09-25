@@ -177,6 +177,16 @@ class SessionStore extends ChangeNotifier {
 
   void _say(String msg) { notice = msg; noticeSeq++; notifyListeners(); }
 
+  String? _inputKind;
+
+  /// Tells the desk whether the person uses touch or a mouse/trackpad right
+  /// now (the dbbasic apps size their controls by it); only changes are sent.
+  void reportInput(String kind) {
+    if (kind == _inputKind) return;
+    _inputKind = kind;
+    _peer?.sendControl({'t': 'input', 'kind': kind});
+  }
+
   Future<void> _controlOpen() async {
     // keys arrive as US positions (see the session screen's key map)
     _peer?.sendControl({'t': 'keyboard', 'layout': 'us'});
@@ -186,6 +196,9 @@ class SessionStore extends ChangeNotifier {
       final h = -off.inHours;
       _peer?.sendControl({'t': 'tz', 'text': h == 0 ? 'Etc/UTC' : 'Etc/GMT${h > 0 ? '+' : ''}$h'});
     }
+    // what the person is using, until the first press says otherwise
+    _inputKind = null;
+    reportInput(Platform.isIOS || Platform.isAndroid ? 'touch' : 'pointer');
     final p = await SharedPreferences.getInstance();
     keepListening = p.getBool('voiceKeep') ?? false;
     final w = p.getInt('displayW'), h = p.getInt('displayH');
