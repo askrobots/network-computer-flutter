@@ -11,6 +11,8 @@ PODS:
   - path_provider_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
+  - printing (1.0.0):
+    - FlutterMacOS
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -22,6 +24,7 @@ DEPENDENCIES:
   - flutter_webrtc (from `Flutter/ephemeral/.symlinks/plugins/flutter_webrtc/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
+  - printing (from `Flutter/ephemeral/.symlinks/plugins/printing/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
 
 SPEC REPOS:
@@ -39,6 +42,8 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
   path_provider_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
+  printing:
+    :path: Flutter/ephemeral/.symlinks/plugins/printing/macos
   shared_preferences_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
 
@@ -48,6 +53,7 @@ SPEC CHECKSUMS:
   flutter_webrtc: af708ba091a5d71e101f9f631a9f96c107581a3d
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
+  printing: c4cf83c78fd684f9bc318e6aadc18972aa48f617
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
   WebRTC-SDK: 7dc931c64c00c735a614382f1a59cf65019c3c17
 

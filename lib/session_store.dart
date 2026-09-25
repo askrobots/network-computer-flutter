@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'protocol.dart';
 import 'signaling.dart';
@@ -95,6 +96,7 @@ class SessionStore extends ChangeNotifier {
             : defaultTargetPlatform == TargetPlatform.iOS ? 'From the desk: $note (Files › Network Computer)'
             : 'From the desk: $note ($path)');
       };
+      peer.onPrint = _print;
       peer.onControl = _onControl;
 
       // Candidates can arrive before the answer is applied (saving the pairing
@@ -174,6 +176,27 @@ class SessionStore extends ChangeNotifier {
   }
 
   void send(InputEvent e) => _peer?.send(e);
+
+  /// The desk printed to "My device": this device's own print dialog
+  /// (AirPrint on an iPhone or iPad, the print panel on a Mac).
+  Future<void> _print(String path, String name) async {
+    final file = File(path);
+    debugPrint('nc print: $name');
+    try {
+      final bytes = await file.readAsBytes();
+      final done = await Printing.layoutPdf(
+          onLayout: (_) async => bytes, name: name,
+          // the desk already laid it out; dynamic layout also deadlocks on macOS
+          dynamicLayout: false);
+      debugPrint('nc print: $name done=$done');
+      _say(done ? 'Printed $name' : 'Not printed: $name');
+    } catch (e) {
+      debugPrint('nc print: $name failed: $e');
+      _say('Could not print $name: $e');
+    } finally {
+      if (await file.exists()) await file.delete();
+    }
+  }
 
   void _say(String msg) { notice = msg; noticeSeq++; notifyListeners(); }
 

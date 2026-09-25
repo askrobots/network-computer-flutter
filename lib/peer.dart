@@ -31,6 +31,7 @@ class PeerClient {
   RTCDataChannel? _fileIn;        // files from the desk
   String? _inName;
   int _inSize = 0;
+  bool _inPrint = false;
   BytesBuilder? _inData;
   Completer<String>? _fileAnswer;
   Future<void> _fileQueue = Future.value();
@@ -45,6 +46,8 @@ class PeerClient {
   void Function()? onControlOpen;
   /// A file from the desk was saved (its path), or failed (null, reason).
   void Function(String? path, String note)? onFileReceived;
+  /// A PDF the desk printed to "My device": this device's print dialog.
+  void Function(String path, String name)? onPrint;
   void Function(Map<String, dynamic>)? onControl;
 
   PeerClient(this.ice, this.relayOnly, this.renderer);
@@ -183,18 +186,31 @@ class PeerClient {
         final h = jsonDecode(m.text) as Map<String, dynamic>;
         _inName = '${h['name']}'.split('/').last.split('\\').last;
         _inSize = (h['size'] as num).toInt();
+        _inPrint = h['print'] == true;
         _inData = BytesBuilder(copy: false);
       } catch (_) {
         await ch.send(RTCDataChannelMessage('error: bad header'));
       }
       return;
     }
-    final name = _inName, data = _inData;
-    _inName = null; _inData = null;
+    final name = _inName, data = _inData, print = _inPrint;
+    _inName = null; _inData = null; _inPrint = false;
     if (name == null || data == null) return;
     if (data.length != _inSize) {
       await ch.send(RTCDataChannelMessage('error: got ${data.length} of $_inSize bytes'));
       onFileReceived?.call(null, '$name did not arrive whole');
+      return;
+    }
+    if (print) { // kept only while its dialog is up: a print job, not a document
+      try {
+        final path = '${(await getTemporaryDirectory()).path}/$name';
+        await File(path).writeAsBytes(data.takeBytes());
+        await ch.send(RTCDataChannelMessage('ok $name'));
+        onPrint?.call(path, name);
+      } catch (e) {
+        await ch.send(RTCDataChannelMessage('error: $e'));
+        onFileReceived?.call(null, '$name: $e');
+      }
       return;
     }
     try {
