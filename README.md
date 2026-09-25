@@ -30,10 +30,22 @@ The Android SDK, Xcode and CocoaPods are the usual Flutter platform prerequisite
 
 1. Run `nc-rendezvous` and `nc-host` from the Go repo.
 2. Enter the rendezvous URL, user, password, pick the host, enter its PIN.
-3. Connect. Drag = move pointer (trackpad), tap = click, long-press = drag,
-   two-finger = right-click. The keyboard button opens a soft keyboard plus a
-   modifier bar (esc, ctrl, alt, cmd, arrows) with sticky modifiers. A hardware
-   keyboard (iPad Magic Keyboard, USB) is captured too.
+3. Connect. On a touch screen:
+
+   | Gesture | On the desk |
+   |---|---|
+   | Tap | Left click |
+   | Double tap | Double click |
+   | Touch and hold, let go | Right click |
+   | Two-finger tap | Right click |
+   | Touch and hold, then move | Drag |
+   | One-finger drag | Move the pointer (trackpad) |
+   | Two-finger drag | Scroll |
+
+   The keyboard button brings up the device's keyboard plus a bar with esc, tab,
+   ctrl, alt, super, shift, arrows, home/end, page up/down, delete and fn (F1–F12).
+   Modifiers apply to the next key; hold one to lock it. A mouse, trackpad or
+   hardware keyboard (iPad Magic Keyboard, USB) works as usual.
 
 ## Layout
 
@@ -43,7 +55,9 @@ lib/signaling.dart       rendezvous WebSocket + /config,/hosts, Basic auth
 lib/peer.dart            flutter_webrtc peer: video/audio in, input + stats
 lib/session_store.dart   connection state, auto-reconnect
 lib/connect_screen.dart  connection UI (remembers settings)
-lib/session_screen.dart  video + trackpad + keyboard + stats
+lib/session_screen.dart  video, top bar, voice, stats
+lib/touch_pad.dart       touch gestures → clicks, drags, scroll
+lib/soft_keyboard.dart   device keyboard → desk keys, plus the key bar
 ```
 
 ## License

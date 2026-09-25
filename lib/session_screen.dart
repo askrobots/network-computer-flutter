@@ -5,10 +5,13 @@ import 'package:provider/provider.dart';
 import 'protocol.dart';
 import 'peer.dart';
 import 'session_store.dart';
+import 'soft_keyboard.dart';
+import 'touch_pad.dart';
 
 /// The live session. Touch as a trackpad by default: drag moves the pointer
-/// relatively, tap clicks, two-finger drag scrolls. A keyboard sheet and a
-/// modifier bar cover keys a soft keyboard lacks.
+/// relatively, tap clicks, two-finger drag scrolls (see touch_pad.dart). The
+/// keyboard button brings up the device's keyboard with a bar of the keys it
+/// lacks (see soft_keyboard.dart); a hardware keyboard types directly.
 class SessionScreen extends StatefulWidget {
   const SessionScreen({super.key});
   @override
@@ -19,9 +22,6 @@ class _SessionScreenState extends State<SessionScreen> {
   bool showStats = false;
   bool keyboardOpen = false;
   double sensitivity = 2.0;
-  final _focus = FocusNode();
-  final _hidden = TextEditingController();
-  final Set<String> _sticky = {};
   int _noticeSeen = 0;
 
   void _send(InputEvent e) => context.read<SessionStore>().send(e);
@@ -31,14 +31,14 @@ class _SessionScreenState extends State<SessionScreen> {
     super.initState();
     // Hardware keyboards (iPad, Bluetooth, USB, this Mac) are caught here,
     // whatever has focus: tapping the voice button used to take focus from
-    // the hidden text field, and keys stopped reaching the desk.
+    // the keyboard's text field, and keys stopped reaching the desk.
     HardwareKeyboard.instance.addHandler(_onHardwareKey);
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
-    _focus.dispose(); _hidden.dispose(); super.dispose();
+    super.dispose();
   }
 
   @override
@@ -57,68 +57,47 @@ class _SessionScreenState extends State<SessionScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        // expand: the only unpositioned child is the zero-size hidden text field,
-        // so a loose Stack collapsed to 0x0 and the whole session drew black
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // video + trackpad
-            Positioned.fill(child: _trackpad(store)),
-            // hidden text field feeding key events
-            Offstage(
-              offstage: true,
-              child: KeyboardListener(
-                focusNode: _focus,
-                onKeyEvent: (_) {},   // keys are handled by _onHardwareKey
-                child: TextField(controller: _hidden),
-              ),
+        // the key bar sits under the picture, not over it, so nothing on the
+        // desk hides behind it; the device's keyboard pushes both up
+        child: Column(children: [
+          Expanded(
+            // expand: with only positioned children a loose Stack collapses
+            // to 0x0 and the whole session draws black
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // video + trackpad
+                Positioned.fill(child: _trackpad(store)),
+                // top bar
+                _topBar(store),
+                if (showStats) _statsCard(store.stats),
+                // bottom left: voice panel and button
+                Positioned(
+                  left: 0, bottom: 0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (store.voicePanel) _voicePanel(store),
+                      _voiceButton(store),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            // top bar
-            _topBar(store),
-            if (showStats) _statsCard(store.stats),
-            if (store.voicePanel) _voicePanel(store),
-            _voiceButton(store),
-            if (keyboardOpen) Align(alignment: Alignment.bottomCenter, child: _modBar()),
-          ],
-        ),
+          ),
+          if (keyboardOpen) SoftKeyboard(onEvent: _send),
+        ]),
       ),
     );
   }
 
-  Widget _trackpad(SessionStore store) {
-    return LayoutBuilder(builder: (context, box) {
-      // The desk's picture is fitted inside the box ("contain"): when the shapes
-      // differ (a 4:3 iPad, a 16:9 desk) there are bars, and a touch has to be
-      // measured against the picture, not the box, or it lands off target.
-      Offset toNorm(Offset p) {
-        final vw = store.renderer.videoWidth.toDouble(), vh = store.renderer.videoHeight.toDouble();
-        final bw = box.maxWidth, bh = box.maxHeight;
-        if (vw <= 0 || vh <= 0) {
-          return Offset((p.dx / bw).clamp(0.0, 1.0), (p.dy / bh).clamp(0.0, 1.0));
-        }
-        final k = (bw / vw) < (bh / vh) ? bw / vw : bh / vh;
-        final w = vw * k, h = vh * k;
-        final left = (bw - w) / 2, top = (bh - h) / 2;
-        return Offset(((p.dx - left) / w).clamp(0.0, 1.0), ((p.dy - top) / h).clamp(0.0, 1.0));
-      }
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (d) {
-          final n = toNorm(d.localPosition);
-          _send(InputEvent('mm', x: n.dx, y: n.dy));
-        },
-        onTap: () { _send(InputEvent('md', b: 0)); _send(InputEvent('mu', b: 0)); },
-        onPanUpdate: (d) {
-          _send(InputEvent('mr',
-              dx: d.delta.dx * sensitivity, dy: d.delta.dy * sensitivity));
-        },
-        onLongPressStart: (d) => _send(InputEvent('md', b: 0)),
-        onLongPressEnd: (d) => _send(InputEvent('mu', b: 0)),
-        onSecondaryTap: () { _send(InputEvent('md', b: 2)); _send(InputEvent('mu', b: 2)); },
+  Widget _trackpad(SessionStore store) => TouchPad(
+        videoSize: () => Size(store.renderer.videoWidth.toDouble(), store.renderer.videoHeight.toDouble()),
+        onEvent: _send,
+        sensitivity: sensitivity,
         child: _video(store),
       );
-    });
-  }
 
   Widget _video(SessionStore store) => RTCVideoView(store.renderer,
       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain);
@@ -137,10 +116,7 @@ class _SessionScreenState extends State<SessionScreen> {
             () => context.read<SessionStore>().toggleMic(),
             active: store.micOn),
         _round(Icons.search, () => context.read<SessionStore>().launch()),
-        _round(Icons.keyboard, () {
-          setState(() => keyboardOpen = !keyboardOpen);
-          if (keyboardOpen) { _focus.requestFocus(); } else { _focus.unfocus(); }
-        }),
+        _round(Icons.keyboard, () => setState(() => keyboardOpen = !keyboardOpen)),
         _more(),
         _round(Icons.close, () => context.read<SessionStore>().disconnect()),
       ]),
@@ -214,8 +190,8 @@ class _SessionScreenState extends State<SessionScreen> {
     );
   }
 
-  Widget _voiceButton(SessionStore store) => Positioned(
-        left: 12, bottom: keyboardOpen ? 64 : 12,
+  Widget _voiceButton(SessionStore store) => Padding(
+        padding: const EdgeInsets.all(12),
         child: Material(
           color: store.voiceOn ? const Color(0xFFD33333) : const Color(0xE61C2129),
           shape: const CircleBorder(),
@@ -228,8 +204,8 @@ class _SessionScreenState extends State<SessionScreen> {
         ),
       );
 
-  Widget _voicePanel(SessionStore store) => Positioned(
-        left: 12, bottom: keyboardOpen ? 128 : 76,
+  Widget _voicePanel(SessionStore store) => Padding(
+        padding: const EdgeInsets.only(left: 12),
         child: Container(
           width: MediaQuery.of(context).size.width.clamp(0, 440) - 24,
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
@@ -316,45 +292,6 @@ class _SessionScreenState extends State<SessionScreen> {
               Text('lost ${s.lost}  jitter ${s.jitterMs.toStringAsFixed(1)} ms'),
             ]),
           ),
-        ),
-      );
-
-  static const _mods = [
-    ('esc', 'Escape', false), ('ctrl', 'ControlLeft', true),
-    ('alt', 'AltLeft', true), ('cmd', 'MetaLeft', true),
-    ('tab', 'Tab', false), ('↑', 'ArrowUp', false), ('↓', 'ArrowDown', false),
-    ('←', 'ArrowLeft', false), ('→', 'ArrowRight', false), ('del', 'Delete', false),
-  ];
-
-  Widget _modBar() => Container(
-        color: const Color(0xCC000000),
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: _mods.map((m) {
-            final on = _sticky.contains(m.$2);
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  backgroundColor: on ? const Color(0xFF4C8DFF) : const Color(0xE61C2129),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () {
-                  if (m.$3) {
-                    setState(() {
-                      if (on) { _sticky.remove(m.$2); _send(InputEvent('ku', code: m.$2)); }
-                      else { _sticky.add(m.$2); _send(InputEvent('kd', code: m.$2)); }
-                    });
-                  } else {
-                    _send(InputEvent('kd', code: m.$2));
-                    _send(InputEvent('ku', code: m.$2));
-                  }
-                },
-                child: Text(m.$1, style: const TextStyle(fontFamily: 'monospace')),
-              ),
-            );
-          }).toList()),
         ),
       );
 
