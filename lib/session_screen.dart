@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -44,6 +45,9 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<SessionStore>();
+    if (Platform.isIOS || Platform.isAndroid) {
+      store.deviceClass = MediaQuery.of(context).size.shortestSide < 600 ? 'phone' : 'tablet';
+    }
     if (store.noticeSeq != _noticeSeen) {
       _noticeSeen = store.noticeSeq;
       final msg = store.notice;

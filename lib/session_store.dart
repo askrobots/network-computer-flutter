@@ -184,8 +184,12 @@ class SessionStore extends ChangeNotifier {
   void reportInput(String kind) {
     if (kind == _inputKind) return;
     _inputKind = kind;
-    _peer?.sendControl({'t': 'input', 'kind': kind});
+    _peer?.sendControl({'t': 'input', 'kind': kind, 'device': deviceClass});
   }
+
+  /// phone, tablet or desktop: the desk lays itself out for it (nc-device).
+  /// Set by the session screen from its size (shortest side under 600 is a phone).
+  String deviceClass = Platform.isIOS || Platform.isAndroid ? 'phone' : 'desktop';
 
   Future<void> _controlOpen() async {
     // keys arrive as US positions (see the session screen's key map)
