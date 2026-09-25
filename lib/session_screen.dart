@@ -87,9 +87,20 @@ class _SessionScreenState extends State<SessionScreen> {
 
   Widget _trackpad(SessionStore store) {
     return LayoutBuilder(builder: (context, box) {
-      Offset toNorm(Offset p) => Offset(
-          (p.dx / box.maxWidth).clamp(0.0, 1.0),
-          (p.dy / box.maxHeight).clamp(0.0, 1.0));
+      // The desk's picture is fitted inside the box ("contain"): when the shapes
+      // differ (a 4:3 iPad, a 16:9 desk) there are bars, and a touch has to be
+      // measured against the picture, not the box, or it lands off target.
+      Offset toNorm(Offset p) {
+        final vw = store.renderer.videoWidth.toDouble(), vh = store.renderer.videoHeight.toDouble();
+        final bw = box.maxWidth, bh = box.maxHeight;
+        if (vw <= 0 || vh <= 0) {
+          return Offset((p.dx / bw).clamp(0.0, 1.0), (p.dy / bh).clamp(0.0, 1.0));
+        }
+        final k = (bw / vw) < (bh / vh) ? bw / vw : bh / vh;
+        final w = vw * k, h = vh * k;
+        final left = (bw - w) / 2, top = (bh - h) / 2;
+        return Offset(((p.dx - left) / w).clamp(0.0, 1.0), ((p.dy - top) / h).clamp(0.0, 1.0));
+      }
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapDown: (d) {
