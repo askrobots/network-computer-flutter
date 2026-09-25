@@ -36,6 +36,11 @@ class PeerClient {
   Completer<String>? _fileAnswer;
   Future<void> _fileQueue = Future.value();
   MediaStream? _mic;
+  // the camera: its own sending video transceiver, opened empty at connect;
+  // the camera is attached only while it is on (the camera light tells the truth)
+  RTCRtpTransceiver? _camTx;
+  MediaStream? _cam;
+  bool _camFront = true;
   Timer? _statsTimer;
   int _lastBytes = 0, _lastFrames = 0;
   DateTime _lastAt = DateTime.now();
@@ -113,6 +118,9 @@ class PeerClient {
     } else {
       await pc.addTransceiver(kind: RTCRtpMediaType.RTCRtpMediaTypeAudio, init: init);
     }
+    _camTx = await pc.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendOnly));
     await _loudspeaker(); // capturing puts iOS in call mode: earpiece otherwise
 
     _input = await pc.createDataChannel(
@@ -269,6 +277,50 @@ class PeerClient {
     debugPrint('nc mic: ${on ? 'on' : 'off'}');
   }
 
+  /// Turn this device's camera on or off. On the desk it is the webcam
+  /// "network-computer camera" for any app (a video call in the browser).
+  Future<void> setCamera(bool on) async {
+    final tx = _camTx;
+    if (tx == null) throw 'not connected';
+    if (!on) {
+      await tx.sender.replaceTrack(null);
+      await _closeCamera();
+      debugPrint('nc camera: off');
+      return;
+    }
+    if (_cam != null) return;
+    final cam = await navigator.mediaDevices.getUserMedia({
+      'audio': false,
+      'video': {
+        'facingMode': _camFront ? 'user' : 'environment',
+        'width': {'ideal': 1280},
+        'height': {'ideal': 720},
+        'frameRate': {'ideal': 30},
+      },
+    });
+    _cam = cam;
+    await tx.sender.replaceTrack(cam.getVideoTracks().first);
+    debugPrint('nc camera: on (${_camFront ? 'front' : 'back'})');
+  }
+
+  bool get cameraOn => _cam != null;
+
+  /// Front to back camera and back (phones, tablets).
+  Future<void> flipCamera() async {
+    _camFront = !_camFront;
+    final t = _cam?.getVideoTracks();
+    if (t == null || t.isEmpty) return;
+    await Helper.switchCamera(t.first);
+  }
+
+  Future<void> _closeCamera() async {
+    for (final t in _cam?.getTracks() ?? <MediaStreamTrack>[]) {
+      await t.stop();
+    }
+    await _cam?.dispose();
+    _cam = null;
+  }
+
   Future<void> _closeMic() async {
     for (final t in _mic?.getTracks() ?? <MediaStreamTrack>[]) {
       await t.stop();
@@ -354,6 +406,7 @@ class PeerClient {
   Future<void> close() async {
     _statsTimer?.cancel();
     await _closeMic();
+    await _closeCamera();
     await _input?.close();
     await _file?.close();
     await _fileIn?.close();

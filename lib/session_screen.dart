@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -120,6 +121,12 @@ class _SessionScreenState extends State<SessionScreen> {
         _round(store.micOn ? Icons.mic : Icons.mic_off,
             () => context.read<SessionStore>().toggleMic(),
             active: store.micOn),
+        // on a phone the camera waits in ⋯ until it is on; on, it is always in
+        // sight (red), so nobody forgets the desk can see them
+        if (store.cameraOn || !_narrow)
+          _round(store.cameraOn ? Icons.videocam : Icons.videocam_off,
+              () => context.read<SessionStore>().toggleCamera(),
+              active: store.cameraOn),
         _round(Icons.search, () => context.read<SessionStore>().launch()),
         _round(Icons.keyboard, () => setState(() => keyboardOpen = !keyboardOpen)),
         _more(),
@@ -127,6 +134,10 @@ class _SessionScreenState extends State<SessionScreen> {
       ]),
     );
   }
+
+  bool get _narrow => MediaQuery.of(context).size.width < 520;
+  bool get _mobile =>
+      defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android;
 
   /// Less frequent things, so the bar fits a phone.
   Widget _more() => Padding(
@@ -144,14 +155,20 @@ class _SessionScreenState extends State<SessionScreen> {
                 case 'files': store.sendFiles(); break;
                 case 'clipdown': store.getClipboard(); break;
                 case 'stats': setState(() => showStats = !showStats); break;
+                case 'camera': store.toggleCamera(); break;
+                case 'flip': store.flipCamera(); break;
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'screen', child: ListTile(leading: Icon(Icons.monitor), title: Text('Screen size…'))),
-              PopupMenuItem(value: 'files', child: ListTile(leading: Icon(Icons.upload_file), title: Text('Send a photo or file to the desk'))),
-              PopupMenuItem(value: 'clipup', child: ListTile(leading: Icon(Icons.upload), title: Text("Send this clipboard to the desk"))),
-              PopupMenuItem(value: 'clipdown', child: ListTile(leading: Icon(Icons.download), title: Text("Get the desk's clipboard"))),
-              PopupMenuItem(value: 'stats', child: ListTile(leading: Icon(Icons.bar_chart), title: Text('Stats'))),
+            itemBuilder: (_) => [
+              if (_narrow && !context.read<SessionStore>().cameraOn)
+                const PopupMenuItem(value: 'camera', child: ListTile(leading: Icon(Icons.videocam), title: Text('Camera on (the desk\'s webcam)'))),
+              if (_mobile && context.read<SessionStore>().cameraOn)
+                const PopupMenuItem(value: 'flip', child: ListTile(leading: Icon(Icons.cameraswitch), title: Text('Switch camera'))),
+              const PopupMenuItem(value: 'screen', child: ListTile(leading: Icon(Icons.monitor), title: Text('Screen size…'))),
+              const PopupMenuItem(value: 'files', child: ListTile(leading: Icon(Icons.upload_file), title: Text('Send a photo or file to the desk'))),
+              const PopupMenuItem(value: 'clipup', child: ListTile(leading: Icon(Icons.upload), title: Text("Send this clipboard to the desk"))),
+              const PopupMenuItem(value: 'clipdown', child: ListTile(leading: Icon(Icons.download), title: Text("Get the desk's clipboard"))),
+              const PopupMenuItem(value: 'stats', child: ListTile(leading: Icon(Icons.bar_chart), title: Text('Stats'))),
             ],
           ),
         ),

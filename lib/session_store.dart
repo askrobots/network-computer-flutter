@@ -21,6 +21,7 @@ class SessionStore extends ChangeNotifier {
   List<String> hosts = [];
   PeerStats stats = PeerStats();
   bool micOn = false;
+  bool cameraOn = false;
 
   // voice: the desk listens (nc-voice); here only the button and the transcript
   bool voiceOn = false, voicePanel = false, keepListening = false;
@@ -166,6 +167,7 @@ class SessionStore extends ChangeNotifier {
 
   Future<void> _teardown() async {
     micOn = false;
+    cameraOn = false;
     voiceOn = false;
     _micByVoice = false;
     _micOffTimer?.cancel();
@@ -402,6 +404,29 @@ class SessionStore extends ChangeNotifier {
 
   /// The desk's clipboard to this device.
   void getClipboard() => _peer?.sendControl({'t': 'clipnow'});
+
+  /// This device's camera as the desk's webcam ("network-computer camera").
+  Future<void> toggleCamera() async {
+    final want = !cameraOn;
+    try {
+      await _peer?.setCamera(want);
+      cameraOn = want;
+      if (want) _say('Camera on: pick "network-computer camera" in the app on the desk');
+    } catch (e) {
+      cameraOn = false;
+      await _peer?.setCamera(false).catchError((_) {});
+      _say('Camera unavailable: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> flipCamera() async {
+    try {
+      await _peer?.flipCamera();
+    } catch (e) {
+      _say('Could not switch cameras: $e');
+    }
+  }
 
   Future<void> toggleMic() async {
     final want = !micOn;

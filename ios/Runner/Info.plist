@@ -9,6 +9,8 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Pick photos and videos to send to your desk.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Your camera, when you turn it on, becomes the desk's webcam for video calls there.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Your microphone is sent to the remote computer only while the mic button is on.</string>
 	<key>CFBundleDevelopmentRegion</key>

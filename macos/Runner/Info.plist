@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Your camera, when you turn it on, becomes the desk's webcam for video calls there.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Talk to your desk and use it as a microphone on the remote desktop.</string>
 	<key>CFBundleDevelopmentRegion</key>
