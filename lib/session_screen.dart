@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
@@ -22,6 +23,9 @@ class SessionScreen extends StatefulWidget {
 
 class _SessionScreenState extends State<SessionScreen> {
   bool showStats = false;
+  // no colour: the desk's picture in grey on this device (the desk is
+  // unchanged), an A/B for whether things read by contrast alone
+  bool gray = false;
   bool keyboardOpen = false;
   double sensitivity = 2.0;
   int _noticeSeen = 0;
@@ -31,6 +35,9 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((p) {
+      if (mounted && (p.getBool('gray') ?? false)) setState(() => gray = true);
+    });
     // Hardware keyboards (iPad, Bluetooth, USB, this Mac) are caught here,
     // whatever has focus: tapping the voice button used to take focus from
     // the keyboard's text field, and keys stopped reaching the desk.
@@ -105,8 +112,24 @@ class _SessionScreenState extends State<SessionScreen> {
         child: _video(store),
       );
 
-  Widget _video(SessionStore store) => RTCVideoView(store.renderer,
-      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain);
+  Widget _video(SessionStore store) {
+    final view = RTCVideoView(store.renderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain);
+    if (!gray) return view;
+    return ColorFiltered(
+      colorFilter: const ColorFilter.matrix(<double>[
+        0.2126, 0.7152, 0.0722, 0, 0,
+        0.2126, 0.7152, 0.0722, 0, 0,
+        0.2126, 0.7152, 0.0722, 0, 0,
+        0, 0, 0, 1, 0,
+      ]),
+      child: view,
+    );
+  }
+
+  Future<void> _toggleGray() async {
+    setState(() => gray = !gray);
+    (await SharedPreferences.getInstance()).setBool('gray', gray);
+  }
 
   Widget _topBar(SessionStore store) {
     final s = store.stats;
@@ -155,6 +178,7 @@ class _SessionScreenState extends State<SessionScreen> {
                 case 'files': store.sendFiles(); break;
                 case 'clipdown': store.getClipboard(); break;
                 case 'stats': setState(() => showStats = !showStats); break;
+                case 'gray': _toggleGray(); break;
                 case 'camera': store.toggleCamera(); break;
                 case 'flip': store.flipCamera(); break;
               }
@@ -168,6 +192,8 @@ class _SessionScreenState extends State<SessionScreen> {
               const PopupMenuItem(value: 'files', child: ListTile(leading: Icon(Icons.upload_file), title: Text('Send a photo or file to the desk'))),
               const PopupMenuItem(value: 'clipup', child: ListTile(leading: Icon(Icons.upload), title: Text("Send this clipboard to the desk"))),
               const PopupMenuItem(value: 'clipdown', child: ListTile(leading: Icon(Icons.download), title: Text("Get the desk's clipboard"))),
+              PopupMenuItem(value: 'gray', child: ListTile(leading: const Icon(Icons.contrast),
+                  title: Text(gray ? 'Colour' : 'No colour (compare)'))),
               const PopupMenuItem(value: 'stats', child: ListTile(leading: Icon(Icons.bar_chart), title: Text('Stats'))),
             ],
           ),
